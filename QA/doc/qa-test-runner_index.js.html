@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: qa-test-runner/index.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: qa-test-runner/index.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>'use strict';
+
+/** 
+ * @module TestRunner 
+ * @description The TestRunner module is dedicated to run a test. This module requires the modules {@link https://github.com/jprichardson/node-fs-extra}, {@link https://nodejs.org/api/path.html}, {@link https://nodejs.org/api/os.html}, {@link https://github.com/caolan/async}, {@link https://github.com/isaacs/node-glob}, {@link https://github.com/arturadib/shelljs} and {@link https://github.com/Leonidas-from-XIV/node-xml2js}
+ * @requires module:Config
+ * @requires module:BuildRunner
+ * @requires fs-extra
+ * @requires path
+ * @requires os
+ * @requires async
+ * @requires glob
+ * @requires shelljs
+ * @requires xml2js
+ */
+
+var fs = require('fs-extra'),
+    path = require('path'),
+    os = require('os'),
+    sh = require('shelljs'),
+    Config = require('../qa-config'),
+    BuildRunner = require('../qa-build-runner'),
+    async = require('async'),
+    glob = require('glob'),
+    moduleBasePath = path.dirname(module.filename),
+    parseString = require('xml2js').parseString,
+    TestRunner = function() {},
+    runner = null,
+    pids = [],
+    globalTimeout = null;
+
+TestRunner.prototype = Object.create(require('events').EventEmitter.prototype);
+
+/** 
+ * @function module:TestRunner.enableRemoteHandler
+ * @description Enable the HTTP remote handler that allows an external process to register a PID to kill (`GET http://127.0.0.1:9080/addPID/&lt;pid>`), to unregister a PID (`GET http://127.0.0.1:9080/removePID/&lt;pid>`) and to send a "heartbeat" (`GET http://127.0.0.1:9080/heartbeat`). The HTTP remote handler either returns `"done"` or `"denied"`.
+ * @returns {module:TestRunner}
+ * @fires module:TestRunner#heartbeat
+ */
+ /**
+ * heartbeat event
+ *
+ * @event module:TestRunner#heartbeat
+ * @type {object}
+ */
+TestRunner.prototype.enableRemoteHandler = function () {
+    var self = this;
+
+    if (global.qaHTTPApplication !== undefined &amp;&amp; global.qaRemoteHandlerDefined !== undefined &amp;&amp; global.qaRemoteHandlerEnabled !== undefined) {
+        if (global.qaRemoteHandlerDefined === false) {
+            global.qaRemoteHandlerDefined = true;
+            global.qaRemoteHandlerEnabled = true;
+            global.qaHTTPApplication.get('/addPID/:pid', function(req, res) {
+                if (global.qaRemoteHandlerEnabled === true) {
+                    try {
+                        self.addPID(parseInt(req.params.pid, 10));
+                    } catch (ignore) {}
+                    res.send('done');
+                } else {
+                    res.send('denied');
+                }                
+            });
+            global.qaHTTPApplication.get('/removePID/:pid', function(req, res) {
+                if (global.qaRemoteHandlerEnabled === true) {
+                    try {
+                        self.removePID(parseInt(req.params.pid, 10));
+                    } catch (ignore) {}
+                    res.send('done');
+                } else {
+                    res.send('denied');
+                }
+            });
+            global.qaHTTPApplication.get('/heartbeat', function(req, res) {
+                if (global.qaRemoteHandlerEnabled === true) {
+                    try {
+                        self.emit('heartbeat');
+                    } catch (ignore) {}
+                    res.send('done');
+                } else {
+                    res.send('denied');
+                }
+            });
+        }
+    }
+
+    return this;
+};
+
+/** 
+ * @function module:TestRunner.disableRemoteHandler
+ * @description Disable the HTTP remote handler.
+ * @returns {module:TestRunner}
+ */
+TestRunner.prototype.disableRemoteHandler = function () {
+    if (global.qaHTTPApplication !== undefined &amp;&amp; global.qaRemoteHandlerDefined !== undefined &amp;&amp; global.qaRemoteHandlerEnabled !== undefined) {
+        if (global.qaRemoteHandlerDefined === true) {
+            global.qaRemoteHandlerEnabled = false;
+        }
+    }
+
+    return this;
+};
+
+/** 
+ * @function module:TestRunner.addPID
+ * @description Register a PID to be killed at the end of the current test
+ * @param {number} pid - The PID to be killed
+ * @throws {TypeError} pid argument must be a number
+ * @returns {module:TestRunner}
+ */
+TestRunner.prototype.addPID = function(pid) {
+    if (typeof pid !== 'number') {
+        throw new TypeError('pid argument must be a number');
+    }
+
+    if (pids.indexOf(pid) === -1 &amp;&amp; pid > 0 &amp;&amp; pid !== process.pid) {
+        pids.push(pid);
+    }
+
+    return this;
+};
+
+/** 
+ * @function module:TestRunner.removePID
+ * @description Unregister a PID
+ * @param {number} pid - The PID to unregister
+ * @throws {TypeError} pid argument must be a number
+ * @returns {module:TestRunner}
+ */
+TestRunner.prototype.removePID = function(pid) {
+    if (typeof pid !== 'number') {
+        throw new TypeError('pid argument must be a number');
+    }
+
+    if (pids.indexOf(pid) !== -1) {
+        pids.splice(pids.indexOf(pid), 1);
+    }
+
+    return this;
+};
+
+/** 
+ * @function module:TestRunner.clearPIDs
+ * @description Unregister all the PIDs
+ * @returns {module:TestRunner}
+ */
+TestRunner.prototype.clearPIDs = function() {
+    pids = [];
+    return this;
+};
+
+/** 
+ * @function module:TestRunner.getPIDs
+ * @description Get all the registred PIDs
+ * @returns {Array}
+ */
+TestRunner.prototype.getPIDs = function() {
+    return pids;
+};
+
+/** 
+ * @function module:TestRunner.killSwitch
+ * @description Kill ALL the known and registred processes
+ * @param {module:TestRunner} self - Current TestRunner instance (when called through a `setTimeout`)
+ * @returns {module:TestRunner}
+ */
+TestRunner.prototype.killSwitch = function(self) {
+    if (self === undefined) {
+        self = this;
+    }
+
+    var buildRunner = new BuildRunner();
+    buildRunner.killAll(true, function () {
+        self.emit('runner done', 'kill switch (timeout)', null);
+    });
+
+    return self;
+};
+
+/** 
+ * @ignore
+ */
+function heartbeat(self) {
+    clearTimeout(globalTimeout);
+    globalTimeout = setTimeout(self.killSwitch, 5 * 60 * 1000, self);
+    return self;
+}
+
+/** 
+ * @ignore
+ */
+function stopHeartbeat(self) {
+    clearTimeout(globalTimeout);
+    self.removeAllListeners('heartbeat');
+    return self;
+}
+
+/** 
+ * @function module:TestRunner.run
+ * @description Run the given test
+ * @param {string} test - The test to run (e.g. `"server_ssjs_api_file_main"`)
+ * @param {module:TestRunner~runCallback} cb - Optional callback
+ * @returns {module:TestRunner}
+ * @throws {TypeError} test argument must be a string
+ * @throws {TypeError} cb argument must be a function
+ * @fires module:TestRunner#test not run
+ * @listens module:TestRunner#event:heartbeat
+ */
+/**
+ * @callback module:TestRunner~runCallback
+ * @param {object} error - Error returned by the method
+ * @param {object} result - The result of the test
+ */
+/**
+ * Failure event
+ *
+ * @event module:TestRunner#test not run
+ * @type {object}
+ * @property {object} error - The error
+ * @property {object} result - The result of the test (there could be a partial result)
+ */
+TestRunner.prototype.run = function(test, cb) {
+    if (typeof test !== 'string') {
+        throw new TypeError('test argument must be a string');
+    }
+    if (cb !== undefined &amp;&amp; typeof cb !== 'function') {
+        throw new TypeError('cb argument must be a function');
+    }
+
+    var self = this,
+        config = new Config(),
+        working_path,
+        runner_path,
+        buildRunner = new BuildRunner();
+
+    async.eachSeries(
+        self.getPIDs(),
+        function(pid, serieCallback) {
+            buildRunner.killByPID(pid, true, function(err) {
+                serieCallback();
+            });
+        },
+        function(err) {
+            self.clearPIDs();
+            self.enableRemoteHandler();
+            stopHeartbeat(self);
+            self.on('heartbeat', function () {
+                heartbeat(self);
+            });
+
+            if (global.qaConfig === undefined) {
+                config.load(function(err) {
+                    if (err) {
+                        if (typeof cb === 'function') {
+                            cb(err);
+                        } else {
+                            self.emit('test not run', err, test);
+                        }
+                    } else {
+                        self.run(test, cb);
+                    }
+                });
+            } else if (global.qaConfig.testDir === undefined) {
+                if (typeof cb === 'function') {
+                    cb('testDir configuration not found');
+                } else {
+                    self.emit('test not run', 'testDir configuration not found', test);
+                }
+            } else if (global.qaConfig.resultsDir === undefined) {
+                if (typeof cb === 'function') {
+                    cb('resultsDir configuration not found');
+                } else {
+                    self.emit('test not run', 'resultsDir configuration not found', test);
+                }
+            } else {
+                self.resolveTestName(test, function(err, test_path) {
+                    if (err) {
+                        if (typeof cb === 'function') {
+                            cb(err);
+                        } else {
+                            self.emit('test not run', err, test);
+                        }
+                    } else {
+                        working_path = path.join(global.qaConfig.testDir, self.getTestNameFromTestPath(test_path));
+                        fs.ensureDir(working_path, function(err) {
+                            if (err) {
+                                if (typeof cb === 'function') {
+                                    cb(err);
+                                } else {
+                                    self.emit('test not run', err, test);
+                                }
+                            } else {
+                                fs.emptyDir(working_path, function(err) {
+                                    if (err) {
+                                        if (typeof cb === 'function') {
+                                            cb(err);
+                                        } else {
+                                            self.emit('test not run', err, test);
+                                        }
+                                    } else {
+                                        fs.copy(path.dirname(test_path), working_path, function(err) {
+                                            if (err) {
+                                                if (typeof cb === 'function') {
+                                                    cb(err);
+                                                } else {
+                                                    self.emit('test not run', err, test);
+                                                }
+                                            } else {
+                                                self.getTestConfig(test_path, function (err, testConfig, isOldFashioned) {
+                                                    if (err) {
+                                                        if (typeof cb === 'function') {
+                                                            cb(err);
+                                                        } else {
+                                                            self.emit('test not run', err, test);
+                                                        }
+                                                    } else {
+                                                        runner_path = path.join(moduleBasePath, 'runners', (isOldFashioned ? 'old-' : '') + testConfig.kind);
+                                                        if (testConfig['4d-base-path'] !== undefined) {
+                                                            self.once('runner done', function (err, result) {
+                                                                stopHeartbeat(self);
+                                                                buildRunner.stop4DServer();
+                                                                wrapTest(err, result, self, test, test_path, working_path, testConfig, isOldFashioned, config.getCurrentChangelist(), config.getCurrentWakandaBranch(), cb);
+                                                            });
+                                                            buildRunner = new BuildRunner();
+                                                            buildRunner.start4DServer(config.getCurrentChangelist(), testConfig['4d-base-path']);
+                                                            buildRunner.once('4d server started', function () {
+                                                                if (testConfig['4d-base-url'] !== undefined &amp;&amp; testConfig['4d-base-expected'] !== undefined) {
+                                                                     buildRunner.check4DServerReady(0, testConfig['4d-base-url'], testConfig['4d-base-expected']);
+                                                                } else {
+                                                                     buildRunner.check4DServerReady(0);
+                                                                 }                                                       
+                                                            });
+                                                            buildRunner.once('4d server ready', function () {
+                                                                try {
+                                                                    runner = require(runner_path);
+                                                                    runner.run(self, test, test_path, working_path, testConfig, config.getCurrentChangelist(), config.getCurrentWakandaBranch());
+                                                                    heartbeat(self);
+                                                                } catch (e) {
+                                                                    self.emit('runner done', e, null);
+                                                                }
+                                                            });
+                                                            buildRunner.once('4d server not started', function () {
+                                                                // @TODO have a flag to disable further 4D tests ? 
+                                                                self.emit('runner done', e, null);
+                                                            });
+                                                            buildRunner.once('4d server not ready', function () {
+                                                                // @TODO have a flag to disable further 4D tests ? 
+                                                                self.emit('runner done', e, null);
+                                                            });
+                                                        } else {
+                                                            self.once('runner done', function (err, result) {
+                                                                stopHeartbeat(self);
+                                                                wrapTest(err, result, self, test, test_path, working_path, testConfig, isOldFashioned, config.getCurrentChangelist(), config.getCurrentWakandaBranch(), cb);
+                                                            });
+                                                            try {
+                                                                runner = require(runner_path);
+                                                                runner.run(self, test, test_path, working_path, testConfig, config.getCurrentChangelist(), config.getCurrentWakandaBranch());
+                                                                heartbeat(self);
+                                                            } catch (e) {
+                                                                self.emit('runner done', e, null);
+                                                            }
+                                                        }
+                                                    }
+                                                });                                      
+                                            }
+                                        });
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            }      
+        }
+    );
+
+    return this;
+};
+
+/** 
+ * @function wrapTest
+ * @description Wrap the current test (once ended): get the raw result and pass it to the TestReporter (not implemented)
+ * @param {object} err - The error returned by the test
+ * @param {object} result - The result returned by the test
+ * @param {module:TestRunner} self - The current TestRunner instance
+ * @param {string} test - The test that has been run (e.g. `"server_ssjs_api_file_main"`)
+ * @param {string} test_path - The full path of the test
+ * @param {string} working_path - The full path of working directory where the test has been run
+ * @param {object} testConfig - The configuration of the test
+ * @param {boolean} isOldFashioned - `true` if the test relies on the "old" mechanisms
+ * @param {number} changelist - The current changelist
+ * @param {string} branch - The current branch
+ * @param {module:TestRunner~runCallback} cb - Optional callback (as given to the {@link module:TestRunner.run} method)
+ * @fires module:TestRunner#test end
+ */
+/**
+ * Termination event
+ *
+ * @event module:TestRunner#test end
+ * @type {object}
+ * @property {object} error - The error
+ * @property {object} result - The result of the test (there could be a partial result)
+ */
+function wrapTest(err, result, self, test, test_path, working_path, testConfig, isOldFashioned, changelist, branch, cb) {
+    var i,
+        success,
+        buildRunner = new BuildRunner();
+
+    self.disableRemoteHandler();
+
+    async.eachSeries(
+        self.getPIDs(),
+        function(pid, serieCallback) {
+            buildRunner.killByPID(pid, true, function(err) {
+                serieCallback();
+            });
+        },
+        function(err) {
+            self.clearPIDs();
+            stopHeartbeat(self);
+
+            if (runner &amp;&amp; typeof runner.removeAllListeners === 'function') {
+                runner.removeAllListeners();
+            }
+            runner = null;
+            if (result &amp;&amp; result.GLOBAL !== undefined &amp;&amp; result.GLOBAL.start !== undefined) {
+                result.GLOBAL.end = new Date();
+            }
+            if (testConfig.reporter === undefined) {
+                testConfig.reporter = 'xml';
+            }
+            // @TODO 'passed', 'unstable', 'failed', 'crashed', 'notrun' (blacklisted)
+            for (i in result) {
+                if (i !== 'GLOBAL') {
+                    if (result[i].report === null || result[i].reportIsErroneous === true) {
+                        result[i].status = 'crashed';
+                        result[i].success = 0;
+                    } else {
+                        switch (testConfig.reporter.toLowerCase()) {
+                            case 'junit':
+                            case 'xml':
+                                try {
+                                    success = parseInt(/success\s?=\s?'?"?([0-9]*\.?[0-9]+)%'?"?/gim.exec(result[i].report)[1], 10);
+                                } catch (e) {
+                                    success = 0;
+                                }
+                                if (success === 0 || isNaN(success)) {
+                                    result[i].status = 'failed';
+                                    result[i].success = 0;
+                                } else if (success === 100) {
+                                    result[i].status = 'passed';
+                                    result[i].success = 0;
+                                } else {
+                                    result[i].status = 'unstable';
+                                    result[i].success = success;
+                                }
+                                break;
+                            case 'html':
+                                result[i].status = 'passed'; // @TODO (?)
+                                result[i].success = 100;
+                                break;
+                            default:
+                                result[i].status = 'passed'; // @TODO
+                                result[i].success = 100;
+                                break;
+                        }
+                    }
+                }
+            }
+            // @todo Send the raw result to the TestReporter module (which will fire the 'test end' event with the formatted result)
+            if (typeof cb === 'function') {
+                cb(err, result);
+            } else {
+                self.emit('test end', err, result, test_path, working_path, testConfig, isOldFashioned, changelist, branch, test);
+            }
+        }
+    );
+}
+
+/** 
+ * @function module:TestRunner.getTestConfig
+ * @description Retrieve the normalized configuration for the given path
+ * @param {string} test_path - The full path (in the P4 workspace) of the configuration file (pom.xml, pom.json, test.conf.json)
+ * @param {module:TestRunner~getTestConfig} cb - Mandatory callback
+ * @returns {module:TestRunner}
+ * @throws {TypeError} test_path argument must be a string
+ * @throws {TypeError} cb argument must be a function
+ */
+/**
+ * @callback module:TestRunner~getTestConfig
+ * @param {object} error - Error returned by the method
+ * @param {object} config - The configuration as an object
+ * @param {boolean} isOldFashioned - `true` if the test relies on the "old" mechanisms
+ */
+TestRunner.prototype.getTestConfig = function(test_path, cb) {
+    if (typeof test_path !== 'string') {
+        throw new TypeError('test_path argument must be a string');
+    }
+    if (typeof cb !== 'function') {
+        throw new TypeError('cb argument must be a function');
+    }
+
+    var config = new Config(),
+        key;
+
+    fs.readFile(test_path, function (err, data) {
+        if (err) {
+            cb(err);
+        } else {
+            if (/\.json$/i.test(test_path) === true) {
+                try {
+                    data = JSON.parse(data.toString());
+                    if (data['os-specific'] !== undefined) {
+                        if (config.isWindows()) {
+                            key = 'win';
+                        } else if (config.isMac()) {
+                            key = 'mac';
+                        } else {
+                            key = 'linux';
+                        }
+                        if (data['os-specific'][key] !== undefined &amp;&amp; typeof data['os-specific'][key] === 'object') {
+                            for (var i in data['os-specific'][key]) {
+                                data[i] = data['os-specific'][key][i];
+                            }
+                        }
+                    }
+                    if (typeof data.kind !== 'string') {
+                        cb('kind not found in ' + test_path);
+                    } else {
+                        data.kind = data.kind.toLowerCase();
+                        cb(null, data, (/^pom\.json$/i.test(path.basename(test_path)) === true));
+                    }
+                } catch (e) {
+                    cb(e);
+                }
+            } else if (/\.xml$/i.test(test_path) === true) {
+                try {
+                    parseString(data.toString(), function(err, rawresult) {                        
+                        if (err) {
+                            cb(err);
+                        } else {
+                            var testConfig = {};
+                            for (var prop in rawresult.project.artifactId) {
+                                if (testConfig.artifactId === undefined) {
+                                    testConfig.artifactId = [];
+                                }
+                                testConfig.artifactId.push(rawresult.project.artifactId[prop]);
+                            }
+                            for (var prop in rawresult.project.properties[0]) {
+                                if (/^virtualpath$/i.test(prop) === true) {
+                                    if (testConfig.virtualPath === undefined) {
+                                        testConfig.virtualPath = [];
+                                    }
+                                    testConfig.virtualPath.push({
+                                        name: rawresult.project.properties[0][prop][0].$.name,
+                                        path: rawresult.project.properties[0][prop][0].$.path,
+                                    });
+                                } else {
+                                    if (/^\d+$/.test(rawresult.project.properties[0][prop][0]) === true) {
+                                        testConfig[prop.replace('jenkins.', '').toLowerCase()] = parseInt(rawresult.project.properties[0][prop][0]);
+                                    } else {
+                                        testConfig[prop.replace('jenkins.', '').toLowerCase()] = rawresult.project.properties[0][prop][0].toLowerCase();
+                                    }
+                                }
+                            }
+                            testConfig.kind = 'maven';
+                            cb(null, testConfig, true);
+                        }                        
+                    });
+                } catch (e) {
+                    cb(e);
+                }                
+            } else {
+                cb('unknown kind for ' + test_path);
+            }
+        }
+    });
+
+    return this;
+};
+
+/** 
+ * @function module:TestRunner.cleanTestFolder
+ * @description Clean the Test folder used to run the tests
+ * @param {module:TestRunner~cleanTestFolderCallback} cb - Optional callback
+ * @returns {module:TestRunner}
+ * @throws {TypeError} cb argument must be a function
+ * @fires module:TestRunner#clean test folder done
+ * @fires module:TestRunner#clean test folder failed
+ */
+/**
+ * @callback module:TestRunner~cleanTestFolderCallback
+ * @param {object} error - Error returned by the method
+ */
+ /**
+ * Success event
+ *
+ * @event module:TestRunner#clean test folder done
+ */
+/**
+ * Failure event
+ *
+ * @event module:TestRunner#clean test folder failed
+ * @type {object}
+ * @property {object} error - The error
+ */
+TestRunner.prototype.cleanTestFolder = function(cb) {
+    if (cb !== undefined &amp;&amp; typeof cb !== 'function') {
+        throw new TypeError('cb argument must be a function');
+    }
+
+    var self = this,
+        config;
+
+    if (global.qaConfig === undefined) {
+        config = new Config();
+        config.load(function(err) {
+            if (err) {
+                if (typeof cb === 'function') {
+                    cb(err);
+                } else {
+                    self.emit('clean test folder failed', err);
+                }
+            } else {
+                self.cleanTestFolder(cb);
+            }
+        });
+    } else if (global.qaConfig.testDir === undefined) {
+        if (typeof cb === 'function') {
+            cb('testDir configuration not found');
+        } else {
+            self.emit('clean test folder failed', 'testDir configuration not found');
+        }
+    } else {
+        fs.emptyDir(global.qaConfig.testDir, function(err) {
+            if (err) {
+                if (typeof cb === 'function') {
+                    cb(err);
+                } else {
+                    self.emit('clean test folder failed', err);
+                }
+            } else {
+                if (typeof cb === 'function') {
+                    cb(null);
+                } else {
+                    self.emit('clean test folder done');
+                }
+            }
+        });
+    }
+
+    return this;
+};
+
+/** 
+ * @function module:TestRunner.cleanResultsFolder
+ * @description Clean the Test folder used to run the tests
+ * @param {integer} maxBuilds - Maximum number of builds to keep
+ * @param {module:TestRunner~cleanResultsFolderCallback} cb - Optional callback
+ * @returns {module:TestRunner}
+ * @throws {TypeError} maxBuilds argument must be a number
+ * @throws {TypeError} cb argument must be a function
+ * @fires module:TestRunner#clean results folder done
+ * @fires module:TestRunner#clean results folder failed
+ */
+/**
+ * @callback module:TestRunner~cleanResultsFolderCallback
+ * @param {object} error - Error returned by the method
+ */
+ /**
+ * Success event
+ *
+ * @event module:TestRunner#clean results folder done
+ */
+/**
+ * Failure event
+ *
+ * @event module:TestRunner#clean results folder failed
+ * @type {object}
+ * @property {object} error - The error
+ */
+TestRunner.prototype.cleanResultsFolder = function(maxBuilds, cb) {
+    if (typeof maxBuilds !== 'number') {
+        throw new TypeError('maxBuilds argument must be a number');
+    }
+    if (cb !== undefined &amp;&amp; typeof cb !== 'function') {
+        throw new TypeError('cb argument must be a function');
+    }
+
+    var self = this,
+        config;
+
+    if (maxBuilds === 0) {
+        maxBuilds = 1;
+    }
+
+    if (global.qaConfig === undefined) {
+        config = new Config();
+        config.load(function(err) {
+            if (err) {
+                if (typeof cb === 'function') {
+                    cb(err);
+                } else {
+                    self.emit('clean results folder failed', err, maxBuilds);
+                }
+            } else {
+                self.cleanResultsFolder(maxBuilds, cb);
+            }
+        });
+    } else if (global.qaConfig.resultsDir === undefined) {
+        if (typeof cb === 'function') {
+            cb('resultsDir configuration not found');
+        } else {
+            self.emit('clean results folder failed', 'resultsDir configuration not found', maxBuilds);
+        }
+    } else {
+        fs.readdir(global.qaConfig.resultsDir, function(err, branches) {
+            if (err) {
+                if (typeof cb === 'function') {
+                    cb(err);
+                } else {
+                    self.emit('clean results folder failed', err, maxBuilds);
+                }
+            } else {
+                async.eachSeries(
+                    branches,
+                    function(branch, branchesSerieCallback) {
+                        fs.readdir(path.join(global.qaConfig.resultsDir, branch), function(err, changelists) {
+                            if (err) {
+                                if (err.code !== "ENOTDIR") {
+                                    branchesSerieCallback(err);
+                                } else {
+                                    branchesSerieCallback();
+                                }
+                            } else {
+                                changelists = changelists.map(function(item) {
+                                    return path.join(global.qaConfig.resultsDir, branch, item);
+                                });
+                                changelists.sort(function(a, b) {
+                                    try {
+                                        var changelist_a = parseInt(/(\d+)$/.exec(a)[1]);
+                                        var changelist_b = parseInt(/(\d+)$/.exec(b)[1]);
+                                        if (changelist_a &lt; changelist_b) {
+                                            return -1;
+                                        }
+                                        if (changelist_a > changelist_b) {
+                                            return 1;
+                                        }
+                                        return 0;
+                                    } catch (e) {
+                                        return 1;
+                                    }
+                                });
+                                if (changelists.length > maxBuilds) {
+                                    changelists = changelists.slice(0, changelists.length - maxBuilds);
+                                    async.eachSeries(
+                                        changelists,
+                                        function(changelist, changelistsSerieCallback) {
+                                            fs.remove(changelist, function(err) {
+                                                if (err) {
+                                                    changelistsSerieCallback(err);
+                                                } else {
+                                                    changelistsSerieCallback();
+                                                }
+                                            });
+                                        },
+                                        function(err) {
+                                            branchesSerieCallback(err);
+                                        }
+                                    );
+                                } else {
+                                    branchesSerieCallback();
+                                }
+                            }
+                        });
+                    },
+                    function(err) {
+                        if (err) {
+                            if (typeof cb === 'function') {
+                                cb(err);
+                            } else {
+                                self.emit('clean results folder failed', err, maxBuilds);
+                            }
+                        } else {
+                            if (typeof cb === 'function') {
+                                cb(null);
+                            } else {
+                                self.emit('clean results folder done', maxBuilds);
+                            }
+                        }
+                    }
+                );
+            }
+        });
+    }
+
+    return this;
+};
+
+/** 
+ * @function module:TestRunner.normalizePath
+ * @description Normalize the given test path (resolve lowercase/uppercase madness, and so on...)
+ * @param {string} the_path - The full path of the test (in P4 workspace)
+ * @param {module:TestRunner~normalizePathCallback} cb - Mandatory callback
+ * @returns {module:TestRunner}
+ * @throws {TypeError} the_path argument must be a string
+ * @throws {TypeError} cb argument must be a function
+ */
+/**
+ * @callback module:TestRunner~normalizePathCallback
+ * @param {object} error - Error returned by the method
+ * @param {string} path - The normalized path
+ */
+TestRunner.prototype.normalizePath = function(the_path, cb) {
+    if (typeof the_path !== 'string') {
+        throw new TypeError('the_path argument must be a string');
+    }
+    if (typeof cb !== 'function') {
+        throw new TypeError('cb argument must be a function');
+    }
+
+    var expected = the_path.replace(/\/\//g, '/').replace(/\\\\/g, '\\').split(path.sep),
+        actual = [],
+        next = null,
+        index = 1;
+
+    async.eachSeries(
+        expected,
+        function(item, serieCallback) {
+            if (next === null) {
+                actual.push(item);
+            } else {
+                for (var i = 0; i &lt; next.length; i++) {
+                    if (next[i] === item) {
+                        actual.push(next[i]);
+                        break;
+                    } else if (next[i].toLowerCase() === item.toLowerCase()) {
+                        actual.push(next[i]);
+                        break;
+                    }
+                }
+            }
+            if (actual.length &lt; expected.length) {
+                fs.readdir(actual.join(path.sep) + path.sep, function(err, files) {
+                    index++;
+                    if (err) {
+                        serieCallback(err);
+                    } else {
+                        next = files;
+                        serieCallback(null);
+                    }
+                });
+            } else {
+                serieCallback(null);
+            }
+        },
+        function(err) {
+            if (err) {
+                cb(err);
+            } else if (expected.join(path.sep).toLowerCase() !== actual.join(path.sep).toLowerCase()) {
+                cb('cannot resolve path ' + the_path);
+            } else {
+                cb(null, actual.join(path.sep));
+            }
+        }
+    );
+
+    return this;
+}
+
+/** 
+ * @function module:TestRunner.getTestNameFromTestPath
+ * @description Return the name of the test (e.g. `"server_ssjs_api_file_main"`) from the given test path (in P4 workspace)
+ * @param {string} test - The test path
+ * @returns {string} The test name
+ */
+TestRunner.prototype.getTestNameFromTestPath = function(test) {
+    var testName = null;
+
+    try {
+        if (/(xml|json)$/i.test(test.toString().trim()) === true) {
+            testName = path.dirname(test.toString().trim());
+        } else {
+            testName = test.toString().trim().replace(/[\\\/]+$/, '');
+        }
+        testName = testName.split(/wakanda[\\\/]+[a-z0-9]+[\\\/]+(common|server|studio)/i);
+        testName = [testName[1].trim()].concat(testName[2].replace(/[\\\/]+tests[\\\/]+?/i, '').trim().split(/[\\\/]+/));
+        testName = testName.map(function (item) {
+            item = item.toLowerCase();
+            if (item === 'core') {
+                return 'main';
+            }
+            return item;
+        }).join('_');
+        if (/_main$/.test(testName) === false) {
+            testName = testName + '_main';
+        }
+    } catch (ignore) { }
+
+    return testName;
+};
+
+/** 
+ * @function module:TestRunner.resolveTestName
+ * @description Return the test path (in P4 workspace) from the given test name (e.g. `"server_ssjs_api_file_main"`) 
+ * @param {string} test - The full path of the test (in P4 workspace)
+ * @param {module:TestRunner~resolveTestNameCallback} cb - Mandatory callback
+ * @returns {module:TestRunner}
+ * @throws {TypeError} test argument must be a string
+ * @throws {TypeError} cb argument must be a function
+ */
+/**
+ * @callback module:TestRunner~resolveTestNameCallback
+ * @param {object} error - Error returned by the method
+ * @param {string} test - The test path
+ */
+TestRunner.prototype.resolveTestName = function(test, cb) {
+    if (typeof test !== 'string') {
+        throw new TypeError('test argument must be a string');
+    }
+    if (typeof cb !== 'function') {
+        throw new TypeError('cb argument must be a function');
+    }
+
+    var self = this,
+        config,
+        stack,
+        parentPath,
+        branch;
+
+    if (global.qaConfig === undefined) {
+        config = new Config();
+        config.load(function(err) {
+            if (err) {
+                cb(err);
+            } else {
+                self.resolveTestName(test, cb);
+            }
+        });
+    } else {
+        if (/(pom|test)(\.conf)?\.(xml|json)$/i.test(test) === true) {
+            self.normalizePath(path.normalize(path.resolve(test)), function(err, test) {
+                if (err) {
+                    cb('test not found: ' + err);
+                } else if (sh.test('-f', test)) {
+                    cb(null, test);
+                } else {
+                    cb('test not found at: ' + test);
+                }
+            });
+        } else if (/[\/\\]+/.test(test) === false &amp;&amp; /_+/.test(test) === true) {
+            config = new Config();
+            stack = test.split('_');
+            if (/main$/i.test(test) === true) {
+                parentPath = stack.slice(0, stack.length - 1);
+            } else {
+                parentPath = stack.slice(0, stack.length);
+            }
+            parentPath = parentPath.map(function(item) {
+                if (item === 'main') {
+                    return 'core';
+                }
+                return item;
+            });
+            branch = config.getCurrentWakandaBranch();
+            if (/main/i.test(branch)) {
+                branch = 'main';
+            } else {
+                branch = branch.toUpperCase();
+            }
+            parentPath[0] = parentPath[0].charAt(0).toUpperCase() + parentPath[0].substr(1).toLowerCase();
+            self.normalizePath(path.normalize(path.resolve(path.join(global.qaConfig.p4.workspaceDir, 'depot', 'Wakanda', branch, parentPath[0], 'tests', parentPath.slice(1).join(path.sep)))), function(err, parentPath) {
+                if (err) {
+                    cb('test not found: ' + err);
+                } else if (stack[stack.length - 1] === 'main') {
+                    if (sh.test('-f', path.normalize(path.join(parentPath, 'test.conf.json')))) {
+                        cb(null, path.normalize(path.join(parentPath, 'test.conf.json')));
+                    } else if (sh.test('-f', path.normalize(path.join(parentPath, 'pom.json')))) {
+                        cb(null, path.normalize(path.join(parentPath, 'pom.json')));
+                    } else if (sh.test('-f', path.normalize(path.join(parentPath, 'pom.xml')))) {
+                        cb(null, path.normalize(path.join(parentPath, 'pom.xml')));
+                    } else if (sh.test('-f', path.normalize(path.join(parentPath, 'core', 'test.conf.json')))) {
+                        cb(null, path.normalize(path.join(parentPath, 'core', 'test.conf.json')));
+                    } else if (sh.test('-f', path.normalize(path.join(parentPath, 'core', 'pom.json')))) {
+                        cb(null, path.normalize(path.join(parentPath, 'core', 'pom.json')));
+                    } else if (sh.test('-f', path.normalize(path.join(parentPath, 'core', 'pom.xml')))) {
+                        cb(null, path.normalize(path.join(parentPath, 'core', 'pom.xml')));
+                    } else {
+                        cb('test not found at: ' + test);
+                    }
+                } else {
+                    if (sh.test('-f', path.normalize(path.join(parentPath, 'test.conf.json')))) {
+                        cb(null, path.normalize(path.join(parentPath, 'test.conf.json')));
+                    } else if (sh.test('-f', path.normalize(path.join(parentPath, 'pom.json')))) {
+                        cb(null, path.normalize(path.join(parentPath, 'pom.json')));
+                    } else if (sh.test('-f', path.normalize(path.join(parentPath, 'pom.xml')))) {
+                        cb(null, path.normalize(path.join(parentPath, 'pom.xml')));
+                    } else {
+                        cb('test not found at: ' + test);
+                    }
+                }
+            });
+        } else {
+            self.normalizePath(path.normalize(path.resolve(test)), function(err, test) {
+                if (err) {
+                    cb('test not found: ' + err);
+                } else if (sh.test('-f', path.normalize(path.join(test, 'test.conf.json')))) {
+                    cb(null, path.normalize(path.join(test, 'test.conf.json')));
+                } else if (sh.test('-f', path.normalize(path.join(test, 'pom.json')))) {
+                    cb(null, path.normalize(path.join(test, 'pom.json')));
+                } else if (sh.test('-f', path.normalize(path.join(test, 'pom.xml')))) {
+                    cb(null, path.normalize(path.join(test, 'pom.xml')));
+                } else {
+                    cb('test not found at: ' + test);
+                }
+            });
+        }
+    }
+
+    return this;
+};
+
+module.exports = TestRunner;</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Mon Aug 03 2015 12:36:14 GMT+0200 (Paris, Madrid (heure d’été))
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>
