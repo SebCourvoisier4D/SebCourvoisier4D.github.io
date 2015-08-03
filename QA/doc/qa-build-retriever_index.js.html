@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: qa-build-retriever/index.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: qa-build-retriever/index.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>'use strict';
+
+/** 
+ * @module BuildRetriever 
+ * @description The BuildRetriever module is dedicated to the download of the builds to test (from {@link http://vip.download.4d.com/}), according to their availability (as published by TeamCity). This module requires the modules {@link https://nodejs.org/api/fs.html}, {@link https://nodejs.org/api/path.html}, {@link https://nodejs.org/api/os.html}, {@link https://github.com/caolan/async}, {@link https://github.com/isaacs/node-glob}, {@link https://github.com/request/request}, {@link https://github.com/sergi/jsftp}, {@link https://github.com/thejoshwolfe/yauzl}, {@link https://github.com/npm/node-tar} and {@link https://nodejs.org/api/zlib.html}
+ * @requires module:Config
+ * @requires fs
+ * @requires path
+ * @requires os
+ * @requires async
+ * @requires glob
+ * @requires request
+ * @requires jsftp
+ * @requires yauzl
+ * @requires tar
+ * @requires zlib
+ */
+var fs = require('fs-extra'),
+    path = require('path'),
+    os = require('os'),
+    Config = require('../qa-config'),
+    async = require('async'),
+    request = require('request'),
+    JSFtp = require('jsftp'),
+    yauzl = require('yauzl'),
+    tar = require('tar'),
+    zlib = require('zlib'),
+    glob = require('glob'),
+    BuildRetriever = function() {};
+
+BuildRetriever.prototype = Object.create(require('events').EventEmitter.prototype);
+
+/** 
+ * @function module:BuildRetriever.setTimeout
+ * @description Set the base timeout used by the BuildRetriever module when fetching new builds
+ * @param {number} timeout - Timeout in milliseconds (`10000` by default)
+ * @throws {TypeError} timeout argument must be a number
+ * @returns {module:BuildRetriever}
+ */
+BuildRetriever.prototype.setTimeout = function(timeout) {
+    if (typeof timeout !== 'number') {
+        throw new TypeError('timeout argument must be a number');
+    }
+    this.priv_timeout = timeout;
+    return this;
+};
+
+/** 
+ * @function module:BuildRetriever.getTimeout
+ * @description Get the base timeout used by the BuildRetriever module when fetching new builds
+ * @returns {number}
+ */
+BuildRetriever.prototype.getTimeout = function() {
+    if (this.priv_timeout === undefined) {
+        this.priv_timeout = 10000;
+    }
+    return this.priv_timeout;
+};
+
+/** 
+ * @function module:BuildRetriever.cleanTempFolder
+ * @description Clean the Temp folder used to decompress the downloaded packages
+ * @param {module:BuildRetriever~cleanTempFolderCallback} cb - Optional callback
+ * @returns {module:BuildRetriever}
+ * @throws {TypeError} cb argument must be a function
+ * @fires module:BuildRetriever#clean temp folder done
+ * @fires module:BuildRetriever#clean temp folder failed
+ */
+/**
+ * @callback module:BuildRetriever~cleanTempFolderCallback
+ * @param {object} error - Error returned by the method
+ */
+ /**
+ * Success event
+ *
+ * @event module:BuildRetriever#clean temp folder done
+ */
+/**
+ * Failure event
+ *
+ * @event module:BuildRetriever#clean temp folder failed
+ * @type {object}
+ * @property {object} error - The error
+ */
+BuildRetriever.prototype.cleanTempFolder = function(cb) {
+    if (cb !== undefined &amp;&amp; typeof cb !== 'function') {
+        throw new TypeError('cb argument must be a function');
+    }
+
+    var self = this,
+        config;
+
+    if (global.qaConfig === undefined) {
+        config = new Config();
+        config.load(function(err) {
+            if (err) {
+                if (typeof cb === 'function') {
+                    cb(err);
+                } else {
+                    self.emit('clean temp folder failed', err);
+                }
+            } else {
+                self.cleanTempFolder(cb);
+            }
+        });
+    } else if (global.qaConfig.tempDir === undefined) {
+        if (typeof cb === 'function') {
+            cb('tempDir configuration not found');
+        } else {
+            self.emit('clean temp folder failed', 'tempDir configuration not found');
+        }
+    } else {
+        fs.emptyDir(global.qaConfig.tempDir, function(err) {
+            if (err) {
+                if (typeof cb === 'function') {
+                    cb(err);
+                } else {
+                    self.emit('clean temp folder failed', err);
+                }
+            } else {
+                if (typeof cb === 'function') {
+                    cb(null);
+                } else {
+                    self.emit('clean temp folder done');
+                }
+            }
+        });
+    }
+
+    return this;
+};
+
+/** 
+ * @function module:BuildRetriever.cleanBuildsFolder
+ * @description Clean the Builds folder used to store the downloaded builds
+ * @param {number} maxBuilds - Maximum number of builds to keep in the folder
+ * @param {module:BuildRetriever~cleanBuildsFolderCallback} cb - Optional callback
+ * @returns {module:BuildRetriever}
+ * @throws {TypeError} maxBuilds argument must be a number
+ * @throws {TypeError} cb argument must be a function
+ * @fires module:BuildRetriever#clean temp folder done
+ * @fires module:BuildRetriever#clean temp folder failed
+ */
+/**
+ * @callback module:BuildRetriever~cleanBuildsFolderCallback
+ * @param {object} error - Error returned by the method
+ */
+ /**
+ * Success event
+ *
+ * @event module:BuildRetriever#clean builds folder done
+ */
+/**
+ * Failure event
+ *
+ * @event module:BuildRetriever#clean builds folder failed
+ * @type {object}
+ * @property {object} error - The error
+ */
+BuildRetriever.prototype.cleanBuildsFolder = function(maxBuilds, cb) {
+    if (typeof maxBuilds !== 'number') {
+        throw new TypeError('maxBuilds argument must be a number');
+    }
+    if (cb !== undefined &amp;&amp; typeof cb !== 'function') {
+        throw new TypeError('cb argument must be a function');
+    }
+
+    var self = this,
+        config;
+
+    if (maxBuilds === 0) {
+        maxBuilds = 1;
+    }
+
+    if (global.qaConfig === undefined) {
+        config = new Config();
+        config.load(function(err) {
+            if (err) {
+                if (typeof cb === 'function') {
+                    cb(err);
+                } else {
+                    self.emit('clean builds folder failed', err, maxBuilds);
+                }
+            } else {
+                self.cleanBuildsFolder(maxBuilds, cb);
+            }
+        });
+    } else if (global.qaConfig.buildsDir === undefined) {
+        if (typeof cb === 'function') {
+            cb('buildsDir configuration not found');
+        } else {
+            self.emit('clean builds folder failed', 'buildsDir configuration not found', maxBuilds);
+        }
+    } else {
+        fs.readdir(global.qaConfig.buildsDir, function(err, branches) {
+            if (err) {
+                if (typeof cb === 'function') {
+                    cb(err);
+                } else {
+                    self.emit('clean builds folder failed', err, maxBuilds);
+                }
+            } else {
+                async.eachSeries(
+                    branches,
+                    function(branch, branchesSerieCallback) {
+                        fs.readdir(path.join(global.qaConfig.buildsDir, branch), function(err, changelists) {
+                            if (err) {
+                                if (err.code !== "ENOTDIR") {
+                                    branchesSerieCallback(err);
+                                } else {
+                                    branchesSerieCallback();
+                                }
+                            } else {
+                                changelists = changelists.map(function(item) {
+                                    return path.join(global.qaConfig.buildsDir, branch, item);
+                                });
+                                changelists.sort(function(a, b) {
+                                    try {
+                                        var changelist_a = parseInt(/(\d+)$/.exec(a)[1]);
+                                        var changelist_b = parseInt(/(\d+)$/.exec(b)[1]);
+                                        if (changelist_a &lt; changelist_b) {
+                                            return -1;
+                                        }
+                                        if (changelist_a > changelist_b) {
+                                            return 1;
+                                        }
+                                        return 0;
+                                    } catch (e) {
+                                        return 1;
+                                    }
+                                });
+                                if (changelists.length > maxBuilds) {
+                                    changelists = changelists.slice(0, changelists.length - maxBuilds);
+                                    async.eachSeries(
+                                        changelists,
+                                        function(changelist, changelistsSerieCallback) {
+                                            fs.remove(changelist, function(err) {
+                                                if (err) {
+                                                    changelistsSerieCallback(err);
+                                                } else {
+                                                    changelistsSerieCallback();
+                                                }
+                                            });
+                                        },
+                                        function(err) {
+                                            branchesSerieCallback(err);
+                                        }
+                                    );
+                                } else {
+                                    branchesSerieCallback();
+                                }
+                            }
+                        });
+                    },
+                    function(err) {
+                        if (err) {
+                            if (typeof cb === 'function') {
+                                cb(err);
+                            } else {
+                                self.emit('clean builds folder failed', err, maxBuilds);
+                            }
+                        } else {
+                            if (typeof cb === 'function') {
+                                cb(null);
+                            } else {
+                                self.emit('clean builds folder done', maxBuilds);
+                            }
+                        }
+                    }
+                );
+            }
+        });
+    }
+
+    return this;
+};
+
+/** 
+ * @function module:BuildRetriever.checkTeamCity
+ * @description Check TeamCity for the availability of a new build, according to the given parameters
+ * @param {string} kind - Kind of build (`"build"`, `"shell"` or `"installer"`)
+ * @param {string} product - Product (`"4d"` or `"wakanda"`)
+ * @param {string} branch - Branch
+ * @param {string} opsys - Operating System (`"win"`, `"mac"` or `"linux"`)
+ * @param {number} changelist - Previous changelist (the method will look for a build with a changelist greater than the given one)
+ * @param {module:BuildRetriever~checkTeamCityCallback} cb - Optional callback
+ * @returns {module:BuildRetriever}
+ * @throws {TypeError} kind argument must be a string
+ * @throws {TypeError} product argument must be a string
+ * @throws {TypeError} branch argument must be a string
+ * @throws {TypeError} opsys argument must be a string
+ * @throws {TypeError} changelist argument must be a number
+ * @throws {TypeError} cb argument must be a function
+ * @fires module:BuildRetriever#new build
+ * @fires module:BuildRetriever#no new build
+ * @fires module:BuildRetriever#check teamcity failed
+ */
+/**
+ * @callback module:BuildRetriever~checkTeamCityCallback
+ * @param {object} error - Error returned by the method
+ * @param {number} changelist - The new changelist
+ */
+ /**
+ * Success event
+ *
+ * @event module:BuildRetriever#new build
+ * @param {number} changelist - The new changelist
+ */
+/**
+ * Failure event
+ *
+ * @event module:BuildRetriever#check teamcity failed
+ * @type {object}
+ * @property {object} error - The error
+ */
+ /**
+ * No new build event
+ *
+ * @event module:BuildRetriever#no new build
+ * @type {object}
+ */
+BuildRetriever.prototype.checkTeamCity = function(kind, product, branch, opsys, changelist, cb) {
+    if (typeof kind !== 'string') {
+        throw new TypeError('kind argument must be a string');
+    }
+    if (typeof product !== 'string') {
+        throw new TypeError('product argument must be a string');
+    }
+    if (typeof branch !== 'string') {
+        throw new TypeError('branch argument must be a string');
+    }
+    if (typeof opsys !== 'string') {
+        throw new TypeError('opsys argument must be a string');
+    }
+    if (typeof changelist !== 'number') {
+        throw new TypeError('changelist argument must be a number');
+    }
+    if (cb !== undefined &amp;&amp; typeof cb !== 'function') {
+        throw new TypeError('cb argument must be a function');
+    }
+
+    var self = this,
+        task = null,
+        baseURL = 'http://QA:quality@srv-build:8111',
+        builds = [],
+        candidates = [],
+        result = null;
+
+    switch (kind.toLowerCase()) {
+        case 'build':
+        case 'shell':
+            switch (product.toLowerCase()) {
+                case '4d':
+                    task = 'Tools4d_CopyBuildArchives4dZip';
+                    break;
+
+                case 'wakanda':
+                    task = 'bt119';
+                    break;
+            }
+            break;
+
+        case 'installer':
+            switch (product.toLowerCase()) {
+                case 'wakanda':
+                    task = 'bt62';
+                    break;
+            }
+            break;
+    }
+    if (task !== null) {
+        request({
+            method: 'GET',
+            uri: baseURL + '/httpAuth/app/rest/buildTypes/id:' + task + '/builds?',
+            json: true
+        }, function(error, response, data) {
+            if (error) {
+                if (typeof cb === 'function') {
+                    cb(error);
+                } else {
+                    self.emit('check teamcity failed', error, kind, product, branch, opsys, changelist);
+                }
+            } else {
+                var i,
+                    len,
+                    matches;
+                for (i = 0, len = Math.min(60, data.build.length); i &lt; len; i = i + 1) {
+                    if (data.build[i].status === 'SUCCESS') {
+                        switch (task) {
+                            case 'bt119':
+                                matches = /^(\d+)-wakanda-([a-z0-9]+)-(.*)$/i.exec(data.build[i].number);
+                                if (matches &amp;&amp; candidates.length &lt; 60 &amp;&amp; (parseInt(matches[1]) > changelist) &amp;&amp; (matches[2].toLowerCase() === branch.toLowerCase()) &amp;&amp; (matches[3].toLowerCase() === opsys.toLowerCase())) {
+                                    candidates.push({
+                                        changelist: parseInt(matches[1]),
+                                        url: data.build[i].href
+                                    });
+                                }
+                                break;
+
+                            case 'Tools4d_CopyBuildArchives4dZip':
+                                matches = /^(\d+)-4d-([a-z0-9\.]+)-(.*)$/i.exec(data.build[i].number);
+                                if (matches &amp;&amp; candidates.length &lt; 60 &amp;&amp; (parseInt(matches[1]) > changelist) &amp;&amp; (matches[2].toLowerCase() === branch.toLowerCase()) &amp;&amp; (matches[3].toLowerCase() === opsys.toLowerCase())) {
+                                    candidates.push({
+                                        changelist: parseInt(matches[1]),
+                                        url: data.build[i].href
+                                    });
+                                }
+                                break;
+
+                            case 'bt62':
+                                matches = /^(\d+)-([a-z0-9\.]+)-installeurs_wakanda_nightly$/i.exec(data.build[i].number);
+                                if (matches &amp;&amp; candidates.length &lt; 60 &amp;&amp; (parseInt(matches[1]) > changelist) &amp;&amp; (matches[2].toLowerCase() === branch.toLowerCase())) {
+                                    candidates.push({
+                                        changelist: parseInt(matches[1]),
+                                        url: data.build[i].href
+                                    });
+                                }
+                                break;
+                        }
+                    }
+                }
+                async.eachSeries(
+                    candidates,
+                    function(item, serieCallback) {
+                        if (result === null) {
+                            request({
+                                method: 'GET',
+                                uri: baseURL + item.url,
+                                json: true
+                            }, function(error, response, data) {
+                                if (!error) {
+                                    var buildData = {},
+                                        buildOpSys;
+
+                                    data.properties.property.forEach(function(property) {
+                                        buildData[property.name.toLowerCase()] = property.value;
+                                    });
+                                    buildOpSys = buildData.os.toLowerCase().split(',');
+                                    if (result === null &amp;&amp; buildOpSys.indexOf(opsys.toLowerCase()) !== -1) {
+                                        result = parseInt(item.changelist);
+                                    }
+                                    serieCallback(null);
+                                } else {
+                                    serieCallback(error);
+                                }
+                            });
+                        } else {
+                            serieCallback(null);
+                        }
+                    },
+                    function(err) {
+                        if (err) {
+                            if (typeof cb === 'function') {
+                                cb(err);
+                            } else {
+                                self.emit('check teamcity failed', err, kind, product, branch, opsys, changelist);
+                            }
+                        } else {
+                            if (result !== null &amp;&amp; isNaN(result) === false &amp;&amp; result > 0) {
+                                if (typeof cb === 'function') {
+                                    cb(null, result);
+                                } else {
+                                    if (kind.toLowerCase() === 'build' &amp;&amp; product.toLowerCase() === 'wakanda') {
+                                        var config = new Config();
+                                        config.setCurrentChangelist(result);
+                                    }
+                                    self.emit('new build', result, kind, product, branch, opsys, changelist);
+                                }
+                            } else {
+                                if (typeof cb === 'function') {
+                                    cb(null, false);
+                                } else {
+                                    self.emit('no new build', kind, product, branch, opsys, changelist);
+                                }
+                            }
+                            
+                        }
+                    }
+                );
+            }
+        });
+    } else {
+        if (typeof cb === 'function') {
+            cb('no task found');
+        } else {
+            self.emit('check teamcity failed', 'no task found', kind, product, branch, opsys, changelist);
+        }
+    }
+
+    return this;
+};
+
+/** 
+ * @function module:BuildRetriever.downloadBuild
+ * @description Download and install a new build from {@link http://vip.download.4d.com/}, according to the given parameters
+ * @param {string} kind - Kind of build (`"build"`, `"shell"` or `"installer"`)
+ * @param {string} product - Product (`"4d"` or `"wakanda"`)
+ * @param {string} branch - Branch
+ * @param {string} opsys - Operating System (`"win"`, `"mac"` or `"linux"`)
+ * @param {number} platform - Current platform (`32` or `64`)
+ * @param {number} changelist - Changelist
+ * @param {module:BuildRetriever~downloadBuildCallback} cb - Optional callback
+ * @returns {module:BuildRetriever}
+ * @throws {TypeError} kind argument must be a string
+ * @throws {TypeError} product argument must be a string
+ * @throws {TypeError} branch argument must be a string
+ * @throws {TypeError} opsys argument must be a string
+ * @throws {TypeError} platform argument must be a number
+ * @throws {TypeError} changelist argument must be a number
+ * @throws {TypeError} cb argument must be a function
+ * @fires module:BuildRetriever#download done
+ * @fires module:BuildRetriever#download error
+ */
+/**
+ * @callback module:BuildRetriever~downloadBuildCallback
+ * @param {object} error - Error returned by the method
+ * @param {Array} relevantItems - The "relevant items" that have been downloaded (cf. {@link module:Config.getRelevantItems})
+ */
+ /**
+ * Success event
+ *
+ * @event module:BuildRetriever#download done
+ * @param {Array} relevantItems - The "relevant items" that have been downloaded (cf. {@link module:Config.getRelevantItems})
+ */
+/**
+ * Failure event
+ *
+ * @event module:BuildRetriever#download error
+ * @type {object}
+ * @property {object} error - The error
+ */
+BuildRetriever.prototype.downloadBuild = function(kind, product, branch, opsys, platform, changelist, cb) {
+    if (typeof kind !== 'string') {
+        throw new TypeError('kind argument must be a string');
+    }
+    if (typeof product !== 'string') {
+        throw new TypeError('product argument must be a string');
+    }
+    if (typeof branch !== 'string') {
+        throw new TypeError('branch argument must be a string');
+    }
+    if (typeof opsys !== 'string') {
+        throw new TypeError('opsys argument must be a string');
+    }
+    if (typeof platform !== 'number') {
+        throw new TypeError('platform argument must be a number');
+    }
+    if (typeof changelist !== 'number') {
+        throw new TypeError('changelist argument must be a number');
+    }
+    if (cb !== undefined &amp;&amp; typeof cb !== 'function') {
+        throw new TypeError('cb argument must be a function');
+    }
+    if (!global.qaConfig || !global.qaConfig.tempDir) {
+        throw new Error('tempDir setting no set');
+    }
+    if (!global.qaConfig || !global.qaConfig.buildsDir) {
+        throw new Error('buildsDir setting no set');
+    }
+
+    var self = this,
+        ftp = new JSFtp({
+            host: global.qaConfig.ftp.host,
+            port: global.qaConfig.ftp.port,
+            user: global.qaConfig.ftp.user,
+            pass: global.qaConfig.ftp.pass
+        }),
+        filesToDownload = {},
+        publishedBranchInPath,
+        publishedBranchInFile,
+        publishedBranchInFileAlternate,
+        opsysInPath,
+        topLevelItemsToMove,
+        relevantItems;
+
+    switch (product.toLowerCase()) {
+        case '4d':
+            switch (kind.toLowerCase()) {
+                case 'build':
+                    if (branch.toLowerCase() === 'main') {
+                        publishedBranchInPath = 'main';
+                    } else {
+                        publishedBranchInPath = 'v' + branch.toUpperCase().replace(/\.x/i, '');
+                        if (opsys.toLowerCase() === 'mac' &amp;&amp; parseInt(/(\d)+/.exec(branch)[1]) &lt; 15) {
+                            platform = 32; // force 32bit for 4D &lt; 15.x on Mac...
+                        }
+                    }
+                    filesToDownload.path = './4D/Products/' + publishedBranchInPath + '/NightlyBuilds/US/Release/';
+                    switch (branch.toLowerCase()) {
+                        case 'main':
+                            switch (opsys.toLowerCase()) {
+                                case 'mac':
+                                    opsysInPath = 'Mac';
+                                    break;
+                                case 'win':
+                                    opsysInPath = 'Win';
+                                    break;
+                            }
+                            break;
+                        default:
+                            opsysInPath = opsys.toUpperCase();
+                            break;
+                    }
+                    filesToDownload.path = filesToDownload.path + opsysInPath + '/' + changelist;
+                    switch (opsys.toLowerCase()) {
+                        case 'mac':
+                            filesToDownload.files = ['4D Server_US_' + (platform === 32 ? 'i386' : 'x86_64') + '.zip'];
+                            break;
+                        case 'win':
+                            filesToDownload.files = ['4D Server_US_' + (platform === 32 ? 'V32' : 'V64') + '.zip'];
+                            break;
+                    }
+                    break;
+            }
+            break;
+        case 'wakanda':
+            switch (kind.toLowerCase()) {
+                case 'build':
+                    if (branch.toLowerCase() === 'main') {
+                        publishedBranchInPath = 'Dev';
+                        publishedBranchInFile = 'Dev';
+                        publishedBranchInFileAlternate = '0.0';
+                    } else {
+                        publishedBranchInPath = branch.toUpperCase();
+                        publishedBranchInFile = 'v' + /(\d+)$/.exec(branch)[1];
+                        publishedBranchInFileAlternate = /(\d+)$/.exec(branch)[1] + '.0';
+                    }
+                    filesToDownload.path = './Wakanda-Enterprise/Products/' + publishedBranchInPath + '/NightlyBuilds/Release/';
+                    switch (branch.toLowerCase()) {
+                        case 'wak10':
+                            switch (opsys.toLowerCase()) {
+                                case 'mac':
+                                    opsysInPath = 'MAC';
+                                    break;
+                                case 'win':
+                                    opsysInPath = 'WIN';
+                                    break;
+                                case 'linux':
+                                    opsysInPath = 'Linux';
+                                    break;
+                            }
+                            break;
+                        case 'wak11':
+                            switch (opsys.toLowerCase()) {
+                                case 'mac':
+                                    opsysInPath = 'MAC';
+                                    break;
+                                case 'win':
+                                    opsysInPath = 'WIN';
+                                    break;
+                                case 'linux':
+                                    opsysInPath = 'Linux';
+                                    break;
+                            }
+                            break;
+                        case 'main':
+                            switch (opsys.toLowerCase()) {
+                                case 'mac':
+                                    opsysInPath = 'Mac';
+                                    break;
+                                case 'win':
+                                    opsysInPath = 'Win';
+                                    break;
+                                case 'linux':
+                                    opsysInPath = 'Linux';
+                                    break;
+                            }
+                            break;
+                    }
+                    filesToDownload.path = filesToDownload.path + opsysInPath + '/' + changelist;
+                    switch (opsys.toLowerCase()) {
+                        case 'mac':
+                            filesToDownload.files = ['Wakanda-Enterprise-All-in-One-' + publishedBranchInFile + '-' + changelist + '.zip'];
+                            break;
+                        case 'win':
+                            filesToDownload.files = ['Wakanda-Enterprise-All-in-One-' + platform + '-' + publishedBranchInFile + '-' + changelist + '.zip'];
+                            break;
+                        case 'linux':
+                            filesToDownload.files = ['wakanda-enterprise-server_' + publishedBranchInFileAlternate + '-' + changelist + '_' + (platform === 32 ? 'i386' : 'amd64') + '.tgz'];
+                            break;
+                    }
+                    break;
+                case 'installer':
+                    if (branch.toLowerCase() === 'main') {
+                        publishedBranchInPath = 'Dev';
+                        publishedBranchInFile = 'Dev';
+                        publishedBranchInFileAlternate = '0.0';
+                    } else {
+                        publishedBranchInPath = branch.toUpperCase();
+                        publishedBranchInFile = 'v' + /(\d+)$/.exec(branch)[1];
+                        publishedBranchInFileAlternate = /(\d+)$/.exec(branch)[1] + '.0';
+                    }
+                    filesToDownload.path = './Wakanda-Enterprise/Products/' + publishedBranchInPath + '/NightlyBuilds/Installer/';
+                    switch (opsys.toLowerCase()) {
+                        case 'mac':
+                            opsysInPath = 'Mac';
+                            break;
+                        case 'win':
+                            opsysInPath = 'Win';
+                            break;
+                        case 'linux':
+                            opsysInPath = 'Linux';
+                            break;
+                    }
+                    filesToDownload.path = filesToDownload.path + opsysInPath + '/' + changelist;
+                    switch (opsys.toLowerCase()) {
+                        case 'mac':
+                            filesToDownload.files = ['Wakanda-Enterprise-All-in-One-' + publishedBranchInFile + '-' + changelist + '.dmg'];
+                            break;
+                        case 'win':
+                            filesToDownload.files = ['Wakanda-Enterprise-All-in-One-' + platform + '-' + publishedBranchInFile + '-' + changelist + '.msi'];
+                            break;
+                        case 'linux':
+                            filesToDownload.files = ['wakanda-enterprise-server_' + publishedBranchInFileAlternate + '-' + changelist + '_' + (platform === 32 ? 'i386' : 'amd64') + '.deb'];
+                            break;
+                    }
+                    break;
+                case 'shell':
+                    if (opsys.toLowerCase() !== 'win' &amp;&amp; platform === 64) {
+                        if (branch.toLowerCase() === 'main') {
+                            publishedBranchInPath = 'Dev';
+                        } else {
+                            publishedBranchInPath = branch.toUpperCase();
+                        }
+                        filesToDownload.path = './Wakanda/Products/' + publishedBranchInPath + '/NightlyBuilds/Release/';
+                        switch (branch.toLowerCase()) {
+                            case 'wak10':
+                                switch (opsys.toLowerCase()) {
+                                    case 'mac':
+                                        opsysInPath = 'MAC';
+                                        break;
+                                    case 'linux':
+                                        opsysInPath = 'Linux';
+                                        break;
+                                }
+                                break;
+                            case 'wak11':
+                                switch (opsys.toLowerCase()) {
+                                    case 'mac':
+                                        opsysInPath = 'MAC';
+                                        break;
+                                    case 'linux':
+                                        opsysInPath = 'Linux';
+                                        break;
+                                }
+                                break;
+                            case 'main':
+                                switch (opsys.toLowerCase()) {
+                                    case 'mac':
+                                        opsysInPath = 'Mac';
+                                        break;
+                                    case 'linux':
+                                        opsysInPath = 'Linux';
+                                        break;
+                                }
+                                break;
+                        }
+                        filesToDownload.path = filesToDownload.path + opsysInPath + '/' + changelist;
+                        switch (opsys.toLowerCase()) {
+                            case 'mac':
+                                filesToDownload.files = ['wakanda-shell-macos-x64.zip'];
+                                break;
+                            case 'linux':
+                                filesToDownload.files = ['wakanda-shell-ubuntu-x64.zip'];
+                                break;
+                        }
+                    }
+                    break;
+            }
+            break;
+    }
+    if (filesToDownload.path &amp;&amp; filesToDownload.files &amp;&amp; filesToDownload.files.length > 0) {
+        topLevelItemsToMove = [];
+        relevantItems = [];
+        fs.emptyDir(global.qaConfig.tempDir, function(err) {
+            if (err) {
+                if (typeof cb === 'function') {
+                    cb(err);
+                } else {
+                    self.emit('download error', err, kind, product, branch, opsys, platform, changelist);
+                }
+            } else {
+                async.eachSeries(filesToDownload.files, function(file, callback) {
+                    ftp.get(filesToDownload.path + '/' + file, path.join(global.qaConfig.tempDir, file), function(err) {
+                        if (err) {
+                            callback(err);
+                        } else {
+                            setTimeout(function() {
+                                if (/\.zip$/i.test(file) === true) {
+                                    yauzl.open(path.join(global.qaConfig.tempDir, file), function(err, zipfile) {
+                                        if (err) {
+                                            callback(err);
+                                        } else {
+                                            zipfile.on('entry', function(entry) {
+                                                if (/\/$/.test(entry.fileName)) {
+                                                    var topEntry = entry.fileName.split('/')[0];
+                                                    if (opsys.toLowerCase() === 'win' &amp;&amp; topLevelItemsToMove.indexOf(topEntry) === -1) {
+                                                        topLevelItemsToMove.push(topEntry);
+                                                    }
+                                                    if (opsys.toLowerCase() === 'mac' &amp;&amp; (/wakanda[a-z\s]+\.app\/$/i.test(entry.fileName) === true || /4d[a-z\s]+\.app\/$/i.test(entry.fileName) === true)) {
+                                                        topLevelItemsToMove.push(entry.fileName);
+                                                        relevantItems.push(entry.fileName);
+                                                    }
+                                                    return;
+                                                }
+                                                zipfile.openReadStream(entry, function(err, readStream) {
+                                                    if (err) {
+                                                        callback(err);
+                                                    } else {
+                                                        fs.ensureDir(path.join(global.qaConfig.tempDir, path.dirname(entry.fileName)), function(err) {
+                                                            if (err) {
+                                                                callback(err);
+                                                            } else {
+                                                                readStream.pipe(fs.createWriteStream(path.join(global.qaConfig.tempDir, entry.fileName)));
+                                                                readStream.once('end', function() {
+                                                                    var topEntry = entry.fileName.split('/')[0];
+                                                                    if (kind.toLowerCase() === 'shell') {
+                                                                        if (/^license.*\.txt$/i.test(path.basename(entry.fileName)) === true) {
+                                                                            relevantItems.push(entry.fileName);
+                                                                            if (topLevelItemsToMove.indexOf(topEntry) === -1) {
+                                                                                topLevelItemsToMove.push(topEntry);
+                                                                            }
+                                                                        }
+                                                                        if (/^wakanda.*$/i.test(path.basename(entry.fileName)) === true &amp;&amp; /gz$/i.test(path.basename(entry.fileName)) === false) {
+                                                                            relevantItems.push(entry.fileName);
+                                                                            if (topLevelItemsToMove.indexOf(topEntry) === -1) {
+                                                                                topLevelItemsToMove.push(topEntry);
+                                                                            }
+                                                                        }
+                                                                    } else {
+                                                                        if (opsys.toLowerCase() === 'win' &amp;&amp; topLevelItemsToMove.indexOf(topEntry) === -1) {
+                                                                            topLevelItemsToMove.push(topEntry);
+                                                                        }
+                                                                        if (/^license.+\.txt$/i.test(path.basename(entry.fileName)) === true) {
+                                                                            relevantItems.push(entry.fileName);
+                                                                            if (topLevelItemsToMove.indexOf(topEntry) === -1) {
+                                                                                topLevelItemsToMove.push(topEntry);
+                                                                            }
+                                                                        }
+                                                                        if (opsys.toLowerCase() === 'win' &amp;&amp; (/wakanda[a-z\s]+\.exe$/i.test(entry.fileName) === true || /4d[a-z\s]+\.exe$/i.test(entry.fileName) === true)) {
+                                                                            relevantItems.push(entry.fileName);
+                                                                        }
+                                                                    }
+                                                                });
+                                                            }
+                                                        });
+                                                    }
+                                                });
+                                            });
+                                            zipfile.once('error', function(err) {
+                                                callback(err);
+                                            });
+                                            zipfile.once('close', function() {
+                                                callback();
+                                            });
+                                        }
+                                    });
+                                } else if (/\.tgz$/i.test(file) === true) {
+                                    fs.createReadStream(path.join(global.qaConfig.tempDir, file))
+                                        .pipe(zlib.createGunzip())
+                                        .pipe(tar.Extract({
+                                            path: global.qaConfig.tempDir
+                                        }))
+                                        .on('error', function(err) {
+                                            callback(); // ignore error, because...
+                                        })
+                                        .once('end', function() {
+                                            glob('**/bin/wakanda-enterprise-server', {
+                                                cwd: global.qaConfig.tempDir
+                                            }, function(err, files) {
+                                                if (files.length > 0) {
+                                                    var topEntry = files[0].split('/')[0];
+                                                    topLevelItemsToMove.push(topEntry);
+                                                    relevantItems.push(files[0]);
+                                                    glob('**/license?*.txt', {
+                                                        cwd: global.qaConfig.tempDir
+                                                    }, function(err, files) {
+                                                        if (files.length > 0) {
+                                                            relevantItems.push(files[0]);
+                                                            callback();
+                                                        } else {
+                                                            callback('missing license');
+                                                        }
+                                                    });
+                                                } else {
+                                                    callback('missing binary');
+                                                }
+                                            });
+                                        });
+                                } else {
+                                    topLevelItemsToMove.push(file);
+                                    relevantItems.push(file);
+                                    callback();
+                                }
+                            }, self.getTimeout());
+                        }
+                    });
+                }, function(err) {
+                    if (err) {
+                        if (typeof cb === 'function') {
+                            cb(null, []);
+                        } else {
+                            self.emit('download error', err, kind, product, branch, opsys, platform, changelist);
+                        }
+                    } else {
+                        setTimeout(function() {
+                            if (kind.toLowerCase() === 'build' &amp;&amp; product.toLowerCase() === '4d') {
+                                var config = new Config();
+                                branch = config.getCurrentWakandaBranch();
+                                changelist = config.getCurrentChangelist();
+                            }
+                            fs.ensureDir(path.join(global.qaConfig.buildsDir, branch.toLowerCase(), changelist.toString()), function(err) {
+                                if (err) {
+                                    if (typeof cb === 'function') {
+                                        cb(err);
+                                    } else {
+                                        self.emit('download error', err, kind, product, branch, opsys, platform, changelist);
+                                    }
+                                } else {
+                                    async.eachSeries(topLevelItemsToMove, function(item, callback) {
+                                        fs.copy(path.join(global.qaConfig.tempDir, item), path.join(global.qaConfig.buildsDir, branch.toLowerCase(), changelist.toString(), path.basename(item)), function(err) {
+                                            if (err) {
+                                                callback(err);
+                                            } else {
+                                                if (opsys.toLowerCase() !== 'win') {
+                                                    chmodr(path.join(global.qaConfig.buildsDir, branch.toLowerCase(), changelist.toString(), path.basename(item)), '755', function(err) {
+                                                        callback(err);
+                                                    });
+                                                } else {
+                                                    callback();
+                                                }
+                                            }
+                                        });
+                                    }, function(err) {
+                                        if (err) {
+                                            if (typeof cb === 'function') {
+                                                cb(err);
+                                            } else {
+                                                self.emit('download error', err, kind, product, branch, opsys, platform, changelist);
+                                            }
+                                        } else {
+                                            relevantItems = relevantItems.map(function(item) {
+                                                if (opsys.toLowerCase() === 'win' || opsys.toLowerCase() === 'linux') {
+                                                    return path.join(global.qaConfig.buildsDir, branch.toLowerCase(), changelist.toString(), item);
+                                                }
+                                                if (opsys.toLowerCase() === 'mac') {
+                                                    return path.join(global.qaConfig.buildsDir, branch.toLowerCase(), changelist.toString(), path.basename(item));
+                                                }
+                                            });
+                                            ftp.raw.quit(function() {
+                                                if (global.qaConfig.relevantItems === undefined) {
+                                                    global.qaConfig.relevantItems = [];
+                                                }
+                                                global.qaConfig.relevantItems = global.qaConfig.relevantItems.concat(relevantItems);
+                                                if (typeof cb === 'function') {
+                                                    cb(null, relevantItems);
+                                                } else {
+                                                    self.emit('download done', relevantItems, kind, product, branch, opsys, platform, changelist);
+                                                }
+                                            });
+                                        }
+                                    });
+                                }
+                            });
+                        }, self.getTimeout());
+                    }
+                });
+            }
+        });
+    } else {
+        if (typeof cb === 'function') {
+            cb(null, []);
+        } else {
+            self.emit('download done', [], kind, product, branch, opsys, platform, changelist);
+        }
+    }
+
+    return this;
+};
+
+// from https://github.com/isaacs/chmodr, without the dirmode thing
+function chmodr(p, mode, cb) {
+    fs.readdir(p, function(er, children) {
+        if (er &amp;&amp; er.code !== "ENOTDIR") return cb(er);
+        if (er || !children.length) return fs.chmod(p, mode, cb);
+        var len = children.length;
+        var errState = null;
+        children.forEach(function(child) {
+            chmodr(path.resolve(p, child), mode, then);
+        });
+
+        function then(er) {
+            if (errState) return;
+            if (er) return cb(errState = er);
+            if (--len === 0) return fs.chmod(p, mode, cb);
+        }
+    });
+}
+
+module.exports = BuildRetriever;</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Fri Jul 31 2015 16:53:08 GMT+0200 (Paris, Madrid (heure d’été))
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>
