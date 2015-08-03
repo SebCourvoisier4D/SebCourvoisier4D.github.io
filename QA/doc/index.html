@@ -43,45 +43,8 @@
 
 
     <section>
-        <article><p>Wakanda QA Internal Tools</p>
-<p>Cf. <a href="https://project.wakanda.org/issues/16676">https://project.wakanda.org/issues/16676</a> </p>
-<h2>Purpose</h2><p>The aim is to develop a single package of node.js modules that provides all the tools needed by the QA team to run the tests and report their results (either programmatically or using the command line):</p>
-<ul>
-<li><strong>Config</strong> (<code>qa-config</code>): handle the loading of the local configuration file used by most of the other components</li>
-<li><strong>Synchronizer</strong> (<code>qa-synchronizer</code>): handle the sync of  tests and other assets across the test machines (through Perforce, GitHub, etc.)</li>
-<li><strong>BuildRetriever</strong> (<code>qa-build-retriever</code>): handle the checking of TeamCity status, the retrieval and dispatch of the new builds as soon as they're made available</li>
-<li><strong>LicenseUpdater</strong> (<code>qa-license-updater</code>): handle the update of 4D licenses (and maybe Wakanda licenses one day)</li>
-<li><strong>BuildRunner</strong> (<code>qa-build-runner</code>): handle the running of the required Wakanda and/or 4D builds (prior to the launch of the tests)</li>
-<li><strong>TestRunner</strong> (<code>qa-test-runner</code>): handle the running of the required tests (could be a wrapper around Karma)</li>
-<li><strong>TestReporter</strong> (<code>qa-test-reporter</code>): handle the reporting of the test results to the Dashboard</li>
-<li><strong>CrashReporter</strong> (<code>qa-crash-reporter</code>): handle the reporting of crashs during tests</li>
-<li><strong>Scripts</strong> (<code>qa-scripts</code>): utility scripts (not modules). The new Wakbot will be one of them (and use the above modules)</li>
-<li>etc.</li>
-</ul>
-<p>The goal is to be able to build the new Wakbot like this:</p>
-<pre class="prettyprint source"><code>var qa = require('QA'),
-    config = new qa.Config(),
-    synchronizer = new qa.Synchronizer(),
-    buildRetriever = new qa.BuildRetriever(),
-    licenseUpdater = new qa.LicenseUpdater();
-
-config.on('config loaded', function (...) {
-    synchronizer.sync(...);
-});
-
-synchronizer.on('sync done', function (...) {
-    buildRetriever.start(...);
-});
-
-buildRetriever.on('new build', function (...) {
-    licenseUpdater.update(...);
-});
-
-licenseUpdater.on('license updated', function (...) {
-    // etc.
-});
-
-config.load();</code></pre></article>
+        <article><p><strong>Wakanda QA Internal Tools</strong></p>
+<h2>Purpose</h2><p>The aim is to develop a single package of node.js modules that provides all the tools needed by the QA team to run the tests and report their results (either programmatically or using the command line).</p></article>
     </section>
 
 
@@ -89,16 +52,309 @@ config.load();</code></pre></article>
 
 
 
+
+
+
+<section>
+
+<header>
+    
+        <h2 id="T000002R000962">
+        qa-scripts/csjs-headless.js
+        </h2>
+        
+    
+</header>
+
+<article>
+    <div class="container-overview">
+    
+        
+            <div class="description"><p><strong>(STABLE)</strong> Run the given test using PhantomJS/SlimerJS/TrifleJS. It means that this script has to be run using one of these headless tools, for instance:</p>
+<p><code>phantomjs /path/to/qa-scripts/csjs-headless.js &lt;test_URL&gt; &lt;report_path&gt;</code></p>
+<p>The script expects 2 arguments:</p>
+<ol>
+<li><code>test_URL</code>: The URL of the test to run (e.g. <code>http://127.0.0.1:8081/index.waPage/index.html?waktest-path=/full/path/to/the/test.js&amp;waktest-format=JUnit</code>)</li>
+<li><code>report_path</code>: The path where the report will be created (as <code>report.json</code>, <code>report.xml</code> or <code>report.html</code> according to the given <code>waktest-format</code> URL parameter)</li>
+</ol></div>
+        
+
+        
+
+
+<dl class="details">
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+    <dt class="tag-source">Source:</dt>
+    <dd class="tag-source"><ul class="dummy"><li>
+        <a href="qa-scripts_csjs-headless.js.html">qa-scripts/csjs-headless.js</a>, <a href="qa-scripts_csjs-headless.js.html#line1">line 1</a>
+    </li></ul></dd>
+    
+
+    
+
+    
+
+    
+</dl>
+
+
+        
+    
+    </div>
+
+    
+
+    
+
+    
+
+    
+
+     
+
+    
+
+    
+
+    
+
+    
+
+    
+</article>
+
+</section>
+
+
+
+
+
+
+
+<section>
+
+<header>
+    
+        <h2 id="T000002R001001">
+        qa-scripts/rename-in-pom.js
+        </h2>
+        
+    
+</header>
+
+<article>
+    <div class="container-overview">
+    
+        
+            <div class="description"><p><strong>(TO BE REMADE)</strong> Perform a search/replace in all the <code>pom.xml</code> and <code>pom.json</code> files:</p>
+<p><code>node /path/to/qa-scripts/rename-in-pom.js</code></p>
+<p>The search/replace patterns (as well as the P4 settings) have to be specified within the script itself (lines 18 to 26).</p></div>
+        
+
+        
+
+
+<dl class="details">
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+    <dt class="tag-source">Source:</dt>
+    <dd class="tag-source"><ul class="dummy"><li>
+        <a href="qa-scripts_rename-in-pom.js.html">qa-scripts/rename-in-pom.js</a>, <a href="qa-scripts_rename-in-pom.js.html#line1">line 1</a>
+    </li></ul></dd>
+    
+
+    
+
+    
+
+    
+</dl>
+
+
+        
+    
+    </div>
+
+    
+
+    
+
+    
+
+    
+
+     
+
+    
+
+    
+
+    
+
+    
+
+    
+</article>
+
+</section>
+
+
+
+
+
+
+
+<section>
+
+<header>
+    
+        <h2 id="T000002R001019">
+        qa-scripts/studio-monitor.js
+        </h2>
+        
+    
+</header>
+
+<article>
+    <div class="container-overview">
+    
+        
+            <div class="description"><p><strong>(STABLE)</strong> This script is meant to be launched by the UnitTest extension of Wakanda Studio when running in test mode. It instantiates a WebSocket server that acts as a relay between the UnitTest extension and the <a href="module-BuildRunner.html">module:BuildRunner</a> module. It allows the test agent to send commands to the Studio and receive its events in real-time.</p></div>
+        
+
+        
+
+
+<dl class="details">
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+    <dt class="tag-source">Source:</dt>
+    <dd class="tag-source"><ul class="dummy"><li>
+        <a href="qa-scripts_studio-monitor.js.html">qa-scripts/studio-monitor.js</a>, <a href="qa-scripts_studio-monitor.js.html#line1">line 1</a>
+    </li></ul></dd>
+    
+
+    
+
+    
+
+    
+</dl>
+
+
+        
+    
+    </div>
+
+    
+
+    
+
+    
+
+    
+
+     
+
+    
+
+    
+
+    
+
+    
+
+    
+</article>
+
+</section>
+
+
+
+
 </div>
 
 <nav>
-    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R000962">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001001">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001019">qa-scripts/studio-monitor.js</a></li></ul>
 </nav>
 
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Mon Aug 03 2015 12:36:14 GMT+0200 (Paris, Madrid (heure d’été))
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Mon Aug 03 2015 14:03:36 GMT+0200 (Paris, Madrid (heure d’été))
 </footer>
 
 <script> prettyPrint(); </script>
