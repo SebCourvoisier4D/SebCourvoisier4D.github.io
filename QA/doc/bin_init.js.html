@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: bin/init.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: bin/init.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>#! /usr/bin/env node
+
+/**
+ * @file **(WORK IN PROGRESS)** Create a new configuration file (this script will be used to finalize the installation of the QA tools).
+ * 
+ * Usage: `qa-init`
+ * 
+ * Prerequisites (some of those could be automatically installed in the future):
+ * - Node.js and Git (with the command line tool).
+ * - P4 Client (with the command line tool and a configured workspace).
+ * - Google Chrome.
+ * - Java SDK.
+ * 
+ * Note: the alias `qa-init` is made available using the `npm link` command.
+ */
+
+var inquirer = require('inquirer'),
+	async = require('async'),
+	qa = require('../'),
+	config = new qa.Config(),
+	osenv = require('osenv'),
+	os = require('os'),
+	path = require('path'),
+	fs = require('fs-extra'),
+	statCache,
+	questions,
+	defaultP4Path,
+	defaultChromeLocation,
+	defaultFirefoxLocation,
+	defaultPhantomJSLocation,
+	defaultDisableTests,
+	defaultUserName = osenv.user(),
+	hostname = (osenv.hostname() ? osenv.hostname() : os.hostname()),
+	configFilePath = path.resolve(__dirname, '..', 'qa-config', 'config', hostname + '.json'),
+	availableBranches = ['main', 'wak11', 'wak10'],
+	defaultDisableTestChoices = [{
+		name: 'Studio',
+		value: 'studio_*',
+		checked: config.isLinux()
+	}, {
+		name: 'Server',
+		value: 'server_*',
+		checked: false
+	}, {
+		name: 'Runtime',
+		value: '*_waf_*',
+		checked: false
+	}, {
+		name: 'Maven',
+		value: 'noJavaTest',
+		checked: true
+	}, {
+		name: '4D Bridge',
+		value: 'no4DTest',
+		checked: true
+	}, {
+		name: 'Connectors',
+		value: '*connector*',
+		checked: true
+	}, {
+		name: 'CLI',
+		value: '*_cli_*',
+		checked: false
+	}, {
+		name: 'Installer',
+		value: '*_installer_*',
+		checked: false
+	}, {
+		name: 'Benchs',
+		value: '*bench*',
+		checked: false
+	}],
+	template = {
+		p4: {},
+		browsers: {},
+		hub: {},
+		ftp: {
+			host: 'vip.download.4d.com',
+			port: 21,
+			user: 'private',
+			pass: 'Zv7c;csv'
+		}
+	};
+
+async.series([
+		function(callback) {
+			setDefaults(callback);
+		},
+		function(callback) {
+			initQuestions(callback);
+		},
+		function(callback) {
+			run(callback)
+		}
+	],
+	function(err) {
+		if (!err) {
+			console.log('Done.');
+		}
+		process.exit(0);
+	});
+
+function setDefaults(cb) {
+	defaultPhantomJSLocation = path.resolve(__dirname, '..', 'node_modules', '.bin', 'phantomjs');
+	if (config.isWindows() === true) {
+		if (/\\/.test(defaultUserName) === true) {
+			defaultUserName = defaultUserName.split('\\')[1];
+		}
+		defaultP4Path = 'c:\\program files\\perforce\\p4.exe';
+		defaultChromeLocation = 'c:\\program files\\google\\chrome\\application\\chrome.exe';
+		defaultFirefoxLocation = 'c:\\program files\\mozilla firefox\\firefox.exe';
+		// defaultPhantomJSLocation = 'c:\\program files\\phantomjs.exe';
+		defaultDisableTests = ['*_installer_linux*', '*_installer_mac*'];
+	} else if (config.isMac() === true) {
+		defaultP4Path = '/Applications/p4';
+		defaultChromeLocation = '/Applications/chrome.app';
+		defaultFirefoxLocation = '/Applications/firefox.app';
+		// defaultPhantomJSLocation = '/Applications/phantomjs';
+		defaultDisableTests = ['*_installer_linux*', '*_installer_win*'];
+	} else {
+		defaultP4Path = '/usr/local/bin/p4';
+		defaultChromeLocation = '/usr/bin/chromium-browser';
+		defaultFirefoxLocation = '/usr/bin/firefox';
+		// defaultPhantomJSLocation = '/usr/local/bin/phantomjs';
+		defaultDisableTests = ['*_installer_win*', '*_installer_mac*'];
+	}
+	cb(null);
+}
+
+function initQuestions(cb) {
+	questions = [{
+		type: 'input',
+		name: 'description',
+		message: 'Machine description'
+	}, {
+		type: 'confirm',
+		name: 'production',
+		message: 'Is it a production machine'
+	}, {
+		type: 'list',
+		name: 'wakandaBranch',
+		message: 'Default Wakanda branch',
+		choices: availableBranches
+	}, {
+		type: 'input',
+		name: 'buildsToKeep',
+		message: 'How many builds to keep',
+		default: 5,
+		validate: function(input) {
+			if (isNaN(parseInt(input))) {
+				return 'Please enter a valid number';
+			}
+			return true;
+		}
+	}, {
+		type: 'input',
+		name: 'p4.bin',
+		message: 'P4 CLI path (leave empty or set to "none" in order to ignore P4)',
+		default: defaultP4Path
+	}, {
+		type: 'input',
+		name: 'p4.host',
+		message: 'P4 host',
+		default: 'srv-sources.private.4d.fr:1666',
+		when: function(answers) {
+			return (answers['p4.bin'].trim() !== '' &amp;&amp; answers['p4.bin'].trim().toLowerCase() !== 'none');
+		}
+	}, {
+		type: 'input',
+		name: 'p4.user',
+		message: 'P4 user',
+		default: defaultUserName,
+		when: function(answers) {
+			return (answers['p4.bin'].trim() !== '' &amp;&amp; answers['p4.bin'].trim().toLowerCase() !== 'none');
+		}
+	}, {
+		type: 'password',
+		name: 'p4.password',
+		message: 'P4 password',
+		when: function(answers) {
+			return (answers['p4.bin'].trim() !== '' &amp;&amp; answers['p4.bin'].trim().toLowerCase() !== 'none');
+		}
+	}, {
+		type: 'input',
+		name: 'p4.workspaceName',
+		message: 'P4 workspace name',
+		when: function(answers) {
+			return (answers['p4.bin'].trim() !== '' &amp;&amp; answers['p4.bin'].trim().toLowerCase() !== 'none');
+		}
+	}, {
+		type: 'input',
+		name: 'p4.workspaceDir',
+		message: 'P4 workspace location',
+		default: path.join(config.getUserHome(), 'p4'),
+		when: function(answers) {
+			return (answers['p4.bin'].trim() !== '' &amp;&amp; answers['p4.bin'].trim().toLowerCase() !== 'none');
+		}
+	}, {
+		type: 'confirm',
+		name: 'p4.sync',
+		message: 'Automatically sync P4 workspace',
+		default: function(answers) {
+			return (answers['p4.bin'].trim() !== '' &amp;&amp; answers['p4.bin'].trim().toLowerCase() !== 'none' &amp;&amp; answers.production === true);
+		},
+		when: function(answers) {
+			return (answers['p4.bin'].trim() !== '' &amp;&amp; answers['p4.bin'].trim().toLowerCase() !== 'none');
+		}
+	}, {
+		type: 'input',
+		name: 'resultsDir',
+		message: 'Results location',
+		default: path.join(config.getUserHome(), 'results')
+	}, {
+		type: 'input',
+		name: 'buildsDir',
+		message: 'Builds location',
+		default: function(answers) {
+			return (path.join(path.dirname(answers.resultsDir), 'builds'));
+		}
+	}, {
+		type: 'input',
+		name: 'testDir',
+		message: 'Tests location',
+		default: function(answers) {
+			return (path.join(path.dirname(answers.resultsDir), 'tests'));
+		}
+	}, {
+		type: 'input',
+		name: 'tempDir',
+		message: 'Temp location',
+		default: function(answers) {
+			return (path.join(path.dirname(answers.resultsDir), 'temp'));
+		}
+	}, {
+		type: 'confirm',
+		name: 'useProxy',
+		message: 'Behind a proxy'
+	}, {
+		type: 'checkbox',
+		name: 'testsDisabled',
+		message: 'DISABLED tests (those tests will NOT be executed!)',
+		choices: defaultDisableTestChoices
+	}, {
+		type: 'input',
+		name: 'browsers.chrome',
+		message: 'Chrome location',
+		default: defaultChromeLocation
+	}, {
+		type: 'input',
+		name: 'browsers.firefox',
+		message: 'Firefox location',
+		default: defaultFirefoxLocation
+	}, {
+		type: 'input',
+		name: 'browsers.headless.chrome',
+		message: 'PhantomJS location',
+		default: defaultPhantomJSLocation
+	}, {
+		type: 'confirm',
+		name: 'hub.connect',
+		message: 'Upload results to the Hub',
+		default: function(answers) {
+			return (answers.production === true);
+		}
+	}, {
+		type: 'confirm',
+		name: 'hub.listen',
+		message: 'Listen for new builds',
+		default: function(answers) {
+			return (answers.production === true);
+		}
+	}];
+	cb(null);
+}
+
+function run(cb) {
+	console.log('\n');
+	inquirer.prompt([{
+		type: 'confirm',
+		name: 'create',
+		message: 'Create a new configuration file for ' + hostname
+	}], function(answers) {
+		if (answers.create === true) {
+			inquirer.prompt(questions, function(answers) {
+				var i,
+					j,
+					stack,
+					current;
+				for (i in answers) {
+					if (i === 'testsDisabled') {
+						if (answers[i] instanceof Array &amp;&amp; answers[i].length > 0) {
+							answers[i].forEach(function(blacklisted) {
+								if (blacklisted.indexOf('*') !== -1) {
+									if (template.blacklist === undefined) {
+										template.blacklist = {};
+									}
+									if (template.blacklist.name === undefined) {
+										template.blacklist.name = [];
+									}
+									template.blacklist.name.push(blacklisted);
+								} else {
+									template[blacklisted] = true;
+								}
+							});
+						}
+					} else if (i.indexOf('.') !== -1) {
+						stack = i.split('.');
+						current = template;
+						for (j = 0; j &lt; stack.length; j = j + 1) {
+							if (j === stack.length - 1) {
+								current[stack[j]] = answers[i];
+							} else if (current[stack[j]] === undefined) {
+								current[stack[j]] = {};
+							}
+							current = current[stack[j]];
+						}
+					} else {
+						template[i] = answers[i];
+					}
+				}
+				defaultDisableTests.forEach(function (blacklisted) {
+					if (template.blacklist === undefined) {
+						template.blacklist = {};
+					}
+					if (template.blacklist.name === undefined) {
+						template.blacklist.name = [];
+					}
+					template.blacklist.name.push(blacklisted);
+				});
+				fs.writeJson(configFilePath, template, function(err) {
+					cb(err);
+				});
+			});
+		} else {
+			cb(true);
+		}
+	});
+}</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001033">bin/clean.js</a></li><li><a href="index.html#T000002R001051">bin/download.js</a></li><li><a href="index.html#T000002R001069">bin/init.js</a></li><li><a href="index.html#T000002R001041">bin/sync-all.js</a></li><li><a href="index.html#T000002R001046">bin/sync-test.js</a></li><li><a href="index.html#T000002R000962">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001001">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001019">qa-scripts/studio-monitor.js</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Mon Aug 03 2015 14:50:40 GMT+0200 (Paris, Madrid (heure d’été))
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

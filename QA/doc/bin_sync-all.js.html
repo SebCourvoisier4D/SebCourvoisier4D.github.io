@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>JSDoc: Global</title>
+    <title>JSDoc: Source: bin/sync-all.js</title>
 
     <script src="scripts/prettify/prettify.js"> </script>
     <script src="scripts/prettify/lang-css.js"> </script>
@@ -17,160 +17,58 @@
 
 <div id="main">
 
-    <h1 class="page-title">Global</h1>
+    <h1 class="page-title">Source: bin/sync-all.js</h1>
 
     
 
 
 
-
-<section>
-
-<header>
     
-        <h2 id="">
-        
-        </h2>
-        
-    
-</header>
-
-<article>
-    <div class="container-overview">
-    
-        
-
-        
-
-
-<dl class="details">
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-</dl>
-
-
-        
-    
-    </div>
-
-    
-
-    
-
-    
-
-    
-
-     
-
-    
-
-    
-        <h3 class="subsection-title">Members</h3>
-
-        
-            
-<h4 class="name" id="qaConfig"><span class="type-signature"></span>qaConfig<span class="type-signature"></span></h4>
-
-
-
-
-<div class="description">
-    <p>The <code>global.qaConfig</code> object stores the local configuration of the test machine (as defined by its <code>qa-config/config/&lt;hostname&gt;.json</code> file). Cf. <a href="https://project.wakanda.org/issues/16678">https://project.wakanda.org/issues/16678</a> for more details.</p>
-</div>
-
-
-
-
-
-
-
-<dl class="details">
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-    <dt class="tag-source">Source:</dt>
-    <dd class="tag-source"><ul class="dummy"><li>
-        <a href="qa-config_index.js.html">qa-config/index.js</a>, <a href="qa-config_index.js.html#line194">line 194</a>
-    </li></ul></dd>
-    
-
-    
-
-    
-
-    
-</dl>
-
-
-
-
-
-
-        
-    
-
-    
-
-    
-
-    
-</article>
-
-</section>
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>#! /usr/bin/env node
+
+/**
+ * @file **(STABLE)** Sync all the tests on the local P4 workspace.
+ * 
+ * Usage: `qa-sync-all [--force]`
+ * 
+ * - `--force` (optional): If set, performs a forced syncing.
+ * 
+ * Note: the alias `qa-sync-all` is made available using the `npm link` command.
+ */
+
+var qa = require('../'),
+	config = new qa.Config(),
+	synchronizer = new qa.Synchronizer(),
+	cli_args = process.argv.slice(2);
+
+config.once('config not loaded', function(error) {
+	console.log('Cannot load the configuration file:', error);
+	process.exit(1);
+});
+
+config.once('config loaded', function() {
+	if (typeof cli_args[0] === 'string' &amp;&amp; cli_args[0] !== '--force') {
+		synchronizer.syncAll(cli_args[0], cli_args.indexOf('--force') !== -1);
+	} else {
+		synchronizer.syncAll(config.getCurrentWakandaBranch(), cli_args.indexOf('--force') !== -1);
+	}
+});
+
+synchronizer.once('sync all failed', function(err, branch) {
+	console.log('Sync error on branch "' + branch + '":', err);
+	process.exit(1);
+});
+
+synchronizer.once('sync all done', function(results, branch) {
+	console.log('Sync done on branch "' + branch + '":\n' + results.slice(-10).join('\n'));
+	process.exit(0);
+});
+
+config.load();</code></pre>
+        </article>
+    </section>
 
 
 

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Source: bin/download.js</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Source: bin/download.js</h1>
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>#! /usr/bin/env node
+
+/**
+ * @file **(STABLE)** Download the latest Wakanda build available according to TeamCity.
+ * 
+ * Usage: `qa-download [&lt;branch>] [--with-4d] [--with-installer] [--with-shell]`
+ * 
+ * - `branch` (`string`, optional): the Wakanda branch to download. It uses the `wakandaBranch` property of the configuration file by default.
+ * - `--with-4d` (optional): If set, also gets the latest 4D Server (relates to the Wakanda branch).
+ * - `--with-installer` (optional): If set, also gets the Wakanda installer.
+ * - `--with-shell` (optional): If set, also gets the Wakanda Shell (Linux and Mac only).
+ * 
+ * Note: the alias `qa-download` is made available using the `npm link` command.
+ */
+
+var qa = require('../'),
+	config = new qa.Config(),
+	buildRetriever = new qa.BuildRetriever(),
+	wakandaBranch,
+	fourdBranch,
+	downloadRetry = 0,
+	cli_args = process.argv.slice(2),
+	waitingFor = [];
+
+config.once('config not loaded', function(error) {
+	console.log('Cannot load the configuration file:', error);
+	process.exit(1);
+});
+
+config.once('config loaded', function() {
+	config.getWakandaBranch();
+});
+
+config.once('wakanda branch', function(branch) {
+	wakandaBranch = branch;
+	if (typeof cli_args[0] === 'string' &amp;&amp; /^-+/.test(cli_args[0]) === false) {
+		wakandaBranch = cli_args[0].toLowerCase();
+	}
+	waitingFor.push('build-wakanda');
+	if (cli_args.indexOf('--with-4d') !== -1) {
+		waitingFor.push('build-4d');
+	}
+	if (cli_args.indexOf('--with-installer') !== -1) {
+		waitingFor.push('installer-wakanda');
+	}
+	if (cli_args.indexOf('--with-shell') !== -1) {
+		waitingFor.push('shell-wakanda');
+	}
+	console.log('Wakanda branch:', wakandaBranch);
+	config.get4DBranchForWakandaBranch(wakandaBranch, function(err, branch) {
+		if (err) {
+			console.log('Error while getting 4D branch: ' + err);
+			process.exit(1);
+		} else {
+			fourdBranch = branch;
+			buildRetriever.checkTeamCity('build', 'wakanda', wakandaBranch, config.isWindows() ? 'win' : (config.isMac() ? 'mac' : 'linux'), 0);
+		}
+	});
+});
+
+buildRetriever.on('new build', function(changelist, kind, product, branch, opsys) {
+	downloadRetry = 0;
+	buildRetriever.setTimeout(10000);
+	console.log('Downloading ' + product + ' ' + kind + ' ' + branch + ' ' + opsys + ' ' + changelist + '...');
+	buildRetriever.downloadBuild(kind, product, branch, opsys, config.is32() ? 32 : 64, changelist);
+});
+
+buildRetriever.on('download error', function(err, kind, product, branch, opsys, platform, changelist) {
+	console.log('Download error for ' + product + ' ' + kind + ' ' + branch + ' ' + opsys + ' ' + platform + ' ' + changelist + ': ' + err);
+	downloadRetry++;
+	if (downloadRetry &lt; 11) {
+		console.log('Retry (' + downloadRetry + '/10)...');
+		setTimeout(function() {
+			buildRetriever.setTimeout(buildRetriever.getTimeout() + 10000).downloadBuild(kind, product, branch, opsys, platform, changelist);
+		}, buildRetriever.getTimeout() + 10000);
+	} else {
+		console.log('Give up!');
+		next(kind, product, 1);
+	}
+});
+
+buildRetriever.on('download done', function(relevantItems, kind, product, branch, opsys, platform, changelist) {
+	console.log('Download done for ' + product + ' ' + kind + ' ' + branch + ' ' + opsys + ' ' + platform + ' ' + changelist + ': ', relevantItems);
+	next(kind, product, 0);
+});
+
+function next(kind, product, exitCode) {
+	var justDone = waitingFor.shift(),
+		branch;
+	if ((justDone === kind + '-' + product) &amp;&amp; waitingFor.length > 0) {
+		if (/4d/i.test(waitingFor[0])) {
+			branch = fourdBranch;
+		} else {
+			branch = wakandaBranch;
+		}
+		buildRetriever.checkTeamCity(waitingFor[0].split('-')[0], waitingFor[0].split('-')[1], branch, config.isWindows() ? 'win' : (config.isMac() ? 'mac' : 'linux'), 0);
+	} else if ((justDone !== kind + '-' + product)) {
+		console.log('Error : expected the ' + kind + ' for ' + product + ', but got the ' + justDone.split('-')[0] + ' for ' + justDone.split('-')[1]);
+		process.exit(1);
+	} else {
+		process.exit(exitCode);
+	}
+}
+
+config.load();</code></pre>
+        </article>
+    </section>
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001033">bin/clean.js</a></li><li><a href="index.html#T000002R001051">bin/download.js</a></li><li><a href="index.html#T000002R001069">bin/init.js</a></li><li><a href="index.html#T000002R001041">bin/sync-all.js</a></li><li><a href="index.html#T000002R001046">bin/sync-test.js</a></li><li><a href="index.html#T000002R000962">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001001">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001019">qa-scripts/studio-monitor.js</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Mon Aug 03 2015 14:50:40 GMT+0200 (Paris, Madrid (heure d’été))
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>

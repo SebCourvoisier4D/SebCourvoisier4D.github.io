@@ -59,6 +59,520 @@
 
 <header>
     
+        <h2 id="T000002R001033">
+        bin/clean.js
+        </h2>
+        
+    
+</header>
+
+<article>
+    <div class="container-overview">
+    
+        
+            <div class="description"><p><strong>(STABLE)</strong> Clean all the folders used by the tests:</p>
+<ul>
+<li>The <strong>Temp</strong> folder: the folder used to download and extract the builds, as defined by the <code>tempDir</code> property of the configuration file</li>
+<li>The <strong>Builds</strong> folder: the folder used to store the builds, as defined by the <code>buildsDir</code> property of the configuration file</li>
+<li>The <strong>Test</strong> folder: the folder used to execute the tests, as defined by the <code>testDir</code> property of the configuration file</li>
+<li>The <strong>Results</strong> folder: the folder used to store the results of the tests, as defined by the <code>resultsDir</code> property of the configuration file</li>
+</ul>
+<p>Usage: <code>qa-clean [&lt;buildsToKeep&gt;]</code></p>
+<ul>
+<li><code>buildsToKeep</code> (<code>number</code>, optional): The number of builds to keep (for both the Results and Builds folders). It uses the <code>buildsToKeep</code> property of the configuration file by default.</li>
+</ul>
+<p>Note: the alias <code>qa-clean</code> is made available using the <code>npm link</code> command.</p></div>
+        
+
+        
+
+
+<dl class="details">
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+    <dt class="tag-source">Source:</dt>
+    <dd class="tag-source"><ul class="dummy"><li>
+        <a href="bin_clean.js.html">bin/clean.js</a>, <a href="bin_clean.js.html#line3">line 3</a>
+    </li></ul></dd>
+    
+
+    
+
+    
+
+    
+</dl>
+
+
+        
+    
+    </div>
+
+    
+
+    
+
+    
+
+    
+
+     
+
+    
+
+    
+
+    
+
+    
+
+    
+</article>
+
+</section>
+
+
+
+
+
+
+
+<section>
+
+<header>
+    
+        <h2 id="T000002R001051">
+        bin/download.js
+        </h2>
+        
+    
+</header>
+
+<article>
+    <div class="container-overview">
+    
+        
+            <div class="description"><p><strong>(STABLE)</strong> Download the latest Wakanda build available according to TeamCity.</p>
+<p>Usage: <code>qa-download [&lt;branch&gt;] [--with-4d] [--with-installer] [--with-shell]</code></p>
+<ul>
+<li><code>branch</code> (<code>string</code>, optional): the Wakanda branch to download. It uses the <code>wakandaBranch</code> property of the configuration file by default.</li>
+<li><code>--with-4d</code> (optional): If set, also gets the latest 4D Server (relates to the Wakanda branch).</li>
+<li><code>--with-installer</code> (optional): If set, also gets the Wakanda installer.</li>
+<li><code>--with-shell</code> (optional): If set, also gets the Wakanda Shell (Linux and Mac only).</li>
+</ul>
+<p>Note: the alias <code>qa-download</code> is made available using the <code>npm link</code> command.</p></div>
+        
+
+        
+
+
+<dl class="details">
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+    <dt class="tag-source">Source:</dt>
+    <dd class="tag-source"><ul class="dummy"><li>
+        <a href="bin_download.js.html">bin/download.js</a>, <a href="bin_download.js.html#line3">line 3</a>
+    </li></ul></dd>
+    
+
+    
+
+    
+
+    
+</dl>
+
+
+        
+    
+    </div>
+
+    
+
+    
+
+    
+
+    
+
+     
+
+    
+
+    
+
+    
+
+    
+
+    
+</article>
+
+</section>
+
+
+
+
+
+
+
+<section>
+
+<header>
+    
+        <h2 id="T000002R001069">
+        bin/init.js
+        </h2>
+        
+    
+</header>
+
+<article>
+    <div class="container-overview">
+    
+        
+            <div class="description"><p><strong>(WORK IN PROGRESS)</strong> Create a new configuration file (this script will be used to finalize the installation of the QA tools).</p>
+<p>Usage: <code>qa-init</code></p>
+<p>Prerequisites (some of those could be automatically installed in the future):</p>
+<ul>
+<li>Node.js and Git (with the command line tool).</li>
+<li>P4 Client (with the command line tool and a configured workspace).</li>
+<li>Google Chrome.</li>
+<li>Java SDK.</li>
+</ul>
+<p>Note: the alias <code>qa-init</code> is made available using the <code>npm link</code> command.</p></div>
+        
+
+        
+
+
+<dl class="details">
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+    <dt class="tag-source">Source:</dt>
+    <dd class="tag-source"><ul class="dummy"><li>
+        <a href="bin_init.js.html">bin/init.js</a>, <a href="bin_init.js.html#line3">line 3</a>
+    </li></ul></dd>
+    
+
+    
+
+    
+
+    
+</dl>
+
+
+        
+    
+    </div>
+
+    
+
+    
+
+    
+
+    
+
+     
+
+    
+
+    
+
+    
+
+    
+
+    
+</article>
+
+</section>
+
+
+
+
+
+
+
+<section>
+
+<header>
+    
+        <h2 id="T000002R001041">
+        bin/sync-all.js
+        </h2>
+        
+    
+</header>
+
+<article>
+    <div class="container-overview">
+    
+        
+            <div class="description"><p><strong>(STABLE)</strong> Sync all the tests on the local P4 workspace.</p>
+<p>Usage: <code>qa-sync-all [--force]</code></p>
+<ul>
+<li><code>--force</code> (optional): If set, performs a forced syncing.</li>
+</ul>
+<p>Note: the alias <code>qa-sync-all</code> is made available using the <code>npm link</code> command.</p></div>
+        
+
+        
+
+
+<dl class="details">
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+    <dt class="tag-source">Source:</dt>
+    <dd class="tag-source"><ul class="dummy"><li>
+        <a href="bin_sync-all.js.html">bin/sync-all.js</a>, <a href="bin_sync-all.js.html#line3">line 3</a>
+    </li></ul></dd>
+    
+
+    
+
+    
+
+    
+</dl>
+
+
+        
+    
+    </div>
+
+    
+
+    
+
+    
+
+    
+
+     
+
+    
+
+    
+
+    
+
+    
+
+    
+</article>
+
+</section>
+
+
+
+
+
+
+
+<section>
+
+<header>
+    
+        <h2 id="T000002R001046">
+        bin/sync-test.js
+        </h2>
+        
+    
+</header>
+
+<article>
+    <div class="container-overview">
+    
+        
+            <div class="description"><p><strong>(STABLE)</strong> Sync the given test on the local P4 workspace.</p>
+<p>Usage: <code>qa-sync-test &lt;test_path&gt; [--force]</code></p>
+<ul>
+<li><code>test_path</code> (<code>string</code>): Full path of the test to sync (path to its .json or .xml configuration file in the local P4 workspace).</li>
+<li><code>--force</code> (optional): If set, performs a forced syncing.</li>
+</ul>
+<p>Note: the alias <code>qa-sync-test</code> is made available using the <code>npm link</code> command.</p></div>
+        
+
+        
+
+
+<dl class="details">
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+    <dt class="tag-source">Source:</dt>
+    <dd class="tag-source"><ul class="dummy"><li>
+        <a href="bin_sync-test.js.html">bin/sync-test.js</a>, <a href="bin_sync-test.js.html#line3">line 3</a>
+    </li></ul></dd>
+    
+
+    
+
+    
+
+    
+</dl>
+
+
+        
+    
+    </div>
+
+    
+
+    
+
+    
+
+    
+
+     
+
+    
+
+    
+
+    
+
+    
+
+    
+</article>
+
+</section>
+
+
+
+
+
+
+
+<section>
+
+<header>
+    
         <h2 id="T000002R000962">
         qa-scripts/csjs-headless.js
         </h2>
@@ -73,10 +587,10 @@
             <div class="description"><p><strong>(STABLE)</strong> Run the given test using PhantomJS/SlimerJS/TrifleJS. It means that this script has to be run using one of these headless tools, for instance:</p>
 <p><code>phantomjs /path/to/qa-scripts/csjs-headless.js &lt;test_URL&gt; &lt;report_path&gt;</code></p>
 <p>The script expects 2 arguments:</p>
-<ol>
+<ul>
 <li><code>test_URL</code>: The URL of the test to run (e.g. <code>http://127.0.0.1:8081/index.waPage/index.html?waktest-path=/full/path/to/the/test.js&amp;waktest-format=JUnit</code>)</li>
 <li><code>report_path</code>: The path where the report will be created (as <code>report.json</code>, <code>report.xml</code> or <code>report.html</code> according to the given <code>waktest-format</code> URL parameter)</li>
-</ol></div>
+</ul></div>
         
 
         
@@ -348,13 +862,13 @@
 </div>
 
 <nav>
-    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R000962">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001001">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001019">qa-scripts/studio-monitor.js</a></li></ul>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001033">bin/clean.js</a></li><li><a href="index.html#T000002R001051">bin/download.js</a></li><li><a href="index.html#T000002R001069">bin/init.js</a></li><li><a href="index.html#T000002R001041">bin/sync-all.js</a></li><li><a href="index.html#T000002R001046">bin/sync-test.js</a></li><li><a href="index.html#T000002R000962">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001001">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001019">qa-scripts/studio-monitor.js</a></li></ul>
 </nav>
 
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Mon Aug 03 2015 14:03:36 GMT+0200 (Paris, Madrid (heure d’été))
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Mon Aug 03 2015 14:50:40 GMT+0200 (Paris, Madrid (heure d’été))
 </footer>
 
 <script> prettyPrint(); </script>

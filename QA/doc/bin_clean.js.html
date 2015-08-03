@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>JSDoc: Global</title>
+    <title>JSDoc: Source: bin/clean.js</title>
 
     <script src="scripts/prettify/prettify.js"> </script>
     <script src="scripts/prettify/lang-css.js"> </script>
@@ -17,160 +17,63 @@
 
 <div id="main">
 
-    <h1 class="page-title">Global</h1>
+    <h1 class="page-title">Source: bin/clean.js</h1>
 
     
 
 
 
-
-<section>
-
-<header>
     
-        <h2 id="">
-        
-        </h2>
-        
-    
-</header>
-
-<article>
-    <div class="container-overview">
-    
-        
-
-        
-
-
-<dl class="details">
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-</dl>
-
-
-        
-    
-    </div>
-
-    
-
-    
-
-    
-
-    
-
-     
-
-    
-
-    
-        <h3 class="subsection-title">Members</h3>
-
-        
-            
-<h4 class="name" id="qaConfig"><span class="type-signature"></span>qaConfig<span class="type-signature"></span></h4>
-
-
-
-
-<div class="description">
-    <p>The <code>global.qaConfig</code> object stores the local configuration of the test machine (as defined by its <code>qa-config/config/&lt;hostname&gt;.json</code> file). Cf. <a href="https://project.wakanda.org/issues/16678">https://project.wakanda.org/issues/16678</a> for more details.</p>
-</div>
-
-
-
-
-
-
-
-<dl class="details">
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-    <dt class="tag-source">Source:</dt>
-    <dd class="tag-source"><ul class="dummy"><li>
-        <a href="qa-config_index.js.html">qa-config/index.js</a>, <a href="qa-config_index.js.html#line194">line 194</a>
-    </li></ul></dd>
-    
-
-    
-
-    
-
-    
-</dl>
-
-
-
-
-
-
-        
-    
-
-    
-
-    
-
-    
-</article>
-
-</section>
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>#! /usr/bin/env node
+
+/**
+ * @file **(STABLE)** Clean all the folders used by the tests:
+ * - The **Temp** folder: the folder used to download and extract the builds, as defined by the `tempDir` property of the configuration file
+ * - The **Builds** folder: the folder used to store the builds, as defined by the `buildsDir` property of the configuration file
+ * - The **Test** folder: the folder used to execute the tests, as defined by the `testDir` property of the configuration file
+ * - The **Results** folder: the folder used to store the results of the tests, as defined by the `resultsDir` property of the configuration file
+ *
+ * Usage: `qa-clean [&lt;buildsToKeep>]`
+ * 
+ * - `buildsToKeep` (`number`, optional): The number of builds to keep (for both the Results and Builds folders). It uses the `buildsToKeep` property of the configuration file by default.
+ * 
+ * Note: the alias `qa-clean` is made available using the `npm link` command.
+ */
+
+var qa = require('../'),
+	main = new qa.QA(),
+	config = new qa.Config(),
+	cli_args = process.argv.slice(2),
+	maxItems;
+
+config.once('config not loaded', function(error) {
+	console.log('Cannot load the configuration file:', error);
+	process.exit(1);
+});
+
+config.once('config loaded', function() {
+	if (global.qaConfig.buildsToKeep !== undefined) {
+		maxItems = global.qaConfig.buildsToKeep;
+	}
+	if (parseInt(cli_args[0]) > 0) {
+		maxItems = parseInt(cli_args[0]);
+	}
+	main.cleanFolders(maxItems, function(err) {
+		if (err) {
+			console.log('Clean error :', err);
+			process.exit(1);
+		} else {
+			console.log('Clean done');
+			process.exit(0);
+		}
+	});
+});
+
+config.load();</code></pre>
+        </article>
+    </section>
 
 
 
