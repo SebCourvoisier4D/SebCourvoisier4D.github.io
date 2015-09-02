@@ -33,6 +33,7 @@
  * @description The TestRunner module is dedicated to run a test. This module requires the modules {@link https://github.com/jprichardson/node-fs-extra}, {@link https://nodejs.org/api/path.html}, {@link https://nodejs.org/api/os.html}, {@link https://github.com/caolan/async}, {@link https://github.com/isaacs/node-glob}, {@link https://github.com/arturadib/shelljs} and {@link https://github.com/Leonidas-from-XIV/node-xml2js}
  * @requires module:Config
  * @requires module:BuildRunner
+ * @requires module:TestReporter
  * @requires fs-extra
  * @requires path
  * @requires os
@@ -48,6 +49,7 @@ var fs = require('fs-extra'),
     sh = require('shelljs'),
     Config = require('../qa-config'),
     BuildRunner = require('../qa-build-runner'),
+    TestReporter = require('../qa-test-reporter'),
     async = require('async'),
     glob = require('glob'),
     moduleBasePath = path.dirname(module.filename),
@@ -430,9 +432,8 @@ TestRunner.prototype.run = function(test, cb) {
  * @property {object} result - The result of the test (there could be a partial result)
  */
 function wrapTest(err, result, self, test, test_path, working_path, testConfig, isOldFashioned, changelist, branch, cb) {
-    var i,
-        success,
-        buildRunner = new BuildRunner();
+    var buildRunner = new BuildRunner(),
+        reporter = new TestReporter();
 
     self.disableRemoteHandler();
 
@@ -446,61 +447,11 @@ function wrapTest(err, result, self, test, test_path, working_path, testConfig, 
         function(err) {
             self.clearPIDs();
             stopHeartbeat(self);
-
             if (runner &amp;&amp; typeof runner.removeAllListeners === 'function') {
                 runner.removeAllListeners();
             }
-            runner = null;
-            if (result &amp;&amp; result.GLOBAL !== undefined &amp;&amp; result.GLOBAL.start !== undefined) {
-                result.GLOBAL.end = new Date();
-            }
-            if (testConfig.reporter === undefined) {
-                testConfig.reporter = 'xml';
-            }
-            // @TODO 'passed', 'unstable', 'failed', 'crashed', 'notrun' (blacklisted)
-            for (i in result) {
-                if (i !== 'GLOBAL') {
-                    if (result[i].report === null || result[i].reportIsErroneous === true) {
-                        result[i].status = 'crashed';
-                        result[i].success = 0;
-                    } else {
-                        switch (testConfig.reporter.toLowerCase()) {
-                            case 'junit':
-                            case 'xml':
-                                try {
-                                    success = parseInt(/success\s?=\s?'?"?([0-9]*\.?[0-9]+)%'?"?/gim.exec(result[i].report)[1], 10);
-                                } catch (e) {
-                                    success = 0;
-                                }
-                                if (success === 0 || isNaN(success)) {
-                                    result[i].status = 'failed';
-                                    result[i].success = 0;
-                                } else if (success === 100) {
-                                    result[i].status = 'passed';
-                                    result[i].success = 0;
-                                } else {
-                                    result[i].status = 'unstable';
-                                    result[i].success = success;
-                                }
-                                break;
-                            case 'html':
-                                result[i].status = 'passed'; // @TODO (?)
-                                result[i].success = 100;
-                                break;
-                            default:
-                                result[i].status = 'passed'; // @TODO
-                                result[i].success = 100;
-                                break;
-                        }
-                    }
-                }
-            }
-            // @todo Send the raw result to the TestReporter module (which will fire the 'test end' event with the formatted result)
-            if (typeof cb === 'function') {
-                cb(err, result);
-            } else {
-                self.emit('test end', err, result, test_path, working_path, testConfig, isOldFashioned, changelist, branch, test);
-            }
+            runner = null;            
+            reporter.report(err, result, self, test, test_path, working_path, testConfig, isOldFashioned, changelist, branch, cb);
         }
     );
 }
@@ -1058,13 +1009,13 @@ module.exports = TestRunner;</code></pre>
 </div>
 
 <nav>
-    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001033">bin/clean.js</a></li><li><a href="index.html#T000002R001051">bin/download.js</a></li><li><a href="index.html#T000002R001069">bin/init.js</a></li><li><a href="index.html#T000002R001041">bin/sync-all.js</a></li><li><a href="index.html#T000002R001046">bin/sync-test.js</a></li><li><a href="index.html#T000002R000962">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001001">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001019">qa-scripts/studio-monitor.js</a></li></ul>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestReporter.html">TestReporter</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001052">bin/clean.js</a></li><li><a href="index.html#T000002R001071">bin/download.js</a></li><li><a href="index.html#T000002R001089">bin/init.js</a></li><li><a href="index.html#T000002R001061">bin/sync-all.js</a></li><li><a href="index.html#T000002R001066">bin/sync-test.js</a></li><li><a href="index.html#T000002R000978">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001017">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001035">qa-scripts/studio-monitor.js</a></li></ul>
 </nav>
 
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Mon Aug 03 2015 17:42:48 GMT+0200 (Paris, Madrid (heure d’été))
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Wed Sep 02 2015 17:46:01 GMT+0200 (Paris, Madrid (heure d’été))
 </footer>
 
 <script> prettyPrint(); </script>

@@ -194,7 +194,7 @@ Synchronizer.prototype.syncTest = function(test, force, cb) {
     }
 
     var self = this,
-        p4Command,
+        syncCommand,
         test_path,
         config;
 
@@ -211,52 +211,54 @@ Synchronizer.prototype.syncTest = function(test, force, cb) {
                 self.syncTest(test, force, cb);
             }
         });
-    } else if (global.qaConfig.p4 === undefined) {
-        if (typeof cb === 'function') {
-            cb('p4 configuration not found');
-        } else {
-            self.emit('sync test failed', 'p4 configuration not found', test, force);
-        }
     } else {
-        buildP4TestPath(test, function(test_path) {
-            if (test_path !== null) {
-                p4Command = buildP4Command(global.qaConfig.p4, 'sync', [force ? '-f' : '', test_path]);
-                async.series([
-                        function(callback) {
-                            if (force === true) {
-                                sh.rm('-rf', test_path.replace('...', ''));
+        if (global.qaConfig.p4 !== undefined) {
+            buildP4TestPath(test, function(test_path) {
+                if (test_path !== null) {
+                    syncCommand = buildP4Command(global.qaConfig.p4, 'sync', [force ? '-f' : '', test_path]);
+                    async.series([
+                            function(callback) {
+                                if (force === true) {
+                                    sh.rm('-rf', test_path.replace('...', ''));
+                                }
+                                callback(null);
+                            },
+                            function(callback) {
+                                sh.exec(syncCommand, {
+                                    silent: true
+                                }, function(code, output) {
+                                    callback(null, output.trim().split(/\r?\n/));
+                                });
                             }
-                            callback(null);
-                        },
-                        function(callback) {
-                            sh.exec(p4Command, {
-                                silent: true
-                            }, function(code, output) {
-                                callback(null, output.trim().split(/\r?\n/));
-                            });
-                        }
-                    ],
-                    function(err, results) {
-                        if (typeof cb === 'function') {
-                            if (err) {
-                                cb(err);
+                        ],
+                        function(err, results) {
+                            if (typeof cb === 'function') {
+                                if (err) {
+                                    cb(err);
+                                } else {
+                                    cb(null, results[1]);
+                                }
+                            } else if (err) {
+                                self.emit('sync test failed', err, test, force);
                             } else {
-                                cb(null, results[1]);
+                                self.emit('sync test done', results[1], test, force);
                             }
-                        } else if (err) {
-                            self.emit('sync test failed', err, test, force);
-                        } else {
-                            self.emit('sync test done', results[1], test, force);
-                        }
-                    });
-            } else {
-                if (typeof cb === 'function') {
-                    cb('cannot process the given test path');
+                        });
                 } else {
-                    self.emit('sync test failed', 'cannot process the given test path', test, force);
+                    if (typeof cb === 'function') {
+                        cb('cannot process the given test path');
+                    } else {
+                        self.emit('sync test failed', 'cannot process the given test path', test, force);
+                    }
                 }
+            });
+        } else {
+            if (typeof cb === 'function') {
+                cb('sync configuration not found');
+            } else {
+                self.emit('sync test failed', 'sync configuration not found', test, force);
             }
-        });
+        }
     }
 
     return this;
@@ -310,7 +312,7 @@ Synchronizer.prototype.syncAll = function(branch, force, cb) {
     }
 
     var self = this,
-        p4Command,
+        syncCommand,
         paths,
         config;
 
@@ -327,45 +329,47 @@ Synchronizer.prototype.syncAll = function(branch, force, cb) {
                 self.syncAll(branch, force, cb);
             }
         });
-    } else if (global.qaConfig.p4 === undefined) {
-        if (typeof cb === 'function') {
-            cb('p4 configuration not found');
-        } else {
-            self.emit('sync all failed', 'p4 configuration not found', branch, force);
-        }
     } else {
-        paths = buildP4Paths(branch, global.qaConfig.p4);
-        p4Command = buildP4Command(global.qaConfig.p4, 'sync', [force ? '-f' : ''].concat(paths));
-        async.series([
-                function(callback) {
-                    if (force === true) {
-                        sh.rm('-rf', paths.map(function(item) {
-                            return item.replace('...', '');
-                        }));
+        if (global.qaConfig.p4 !== undefined) {
+            paths = buildP4Paths(branch, global.qaConfig.p4);
+            syncCommand = buildP4Command(global.qaConfig.p4, 'sync', [force ? '-f' : ''].concat(paths));
+            async.series([
+                    function(callback) {
+                        if (force === true) {
+                            sh.rm('-rf', paths.map(function(item) {
+                                return item.replace('...', '');
+                            }));
+                        }
+                        callback(null);
+                    },
+                    function(callback) {
+                        sh.exec(syncCommand, {
+                            silent: true
+                        }, function(code, output) {
+                            callback(null, output.trim().split(/\r?\n/));
+                        });
                     }
-                    callback(null);
-                },
-                function(callback) {
-                    sh.exec(p4Command, {
-                        silent: true
-                    }, function(code, output) {
-                        callback(null, output.trim().split(/\r?\n/));
-                    });
-                }
-            ],
-            function(err, results) {
-                if (typeof cb === 'function') {
-                    if (err) {
-                        cb(err);
+                ],
+                function(err, results) {
+                    if (typeof cb === 'function') {
+                        if (err) {
+                            cb(err);
+                        } else {
+                            cb(null, results[1]);
+                        }
+                    } else if (err) {
+                        self.emit('sync all failed', err, branch, force);
                     } else {
-                        cb(null, results[1]);
+                        self.emit('sync all done', results[1], branch, force);
                     }
-                } else if (err) {
-                    self.emit('sync all failed', err, branch, force);
-                } else {
-                    self.emit('sync all done', results[1], branch, force);
-                }
-            });
+                });
+        } else {
+            if (typeof cb === 'function') {
+                cb('sync configuration not found');
+            } else {
+                self.emit('sync all failed', 'sync configuration not found', branch, force);
+            }
+        }
     }
 
     return this;
@@ -381,13 +385,13 @@ module.exports = Synchronizer;</code></pre>
 </div>
 
 <nav>
-    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001033">bin/clean.js</a></li><li><a href="index.html#T000002R001051">bin/download.js</a></li><li><a href="index.html#T000002R001069">bin/init.js</a></li><li><a href="index.html#T000002R001041">bin/sync-all.js</a></li><li><a href="index.html#T000002R001046">bin/sync-test.js</a></li><li><a href="index.html#T000002R000962">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001001">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001019">qa-scripts/studio-monitor.js</a></li></ul>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestReporter.html">TestReporter</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001052">bin/clean.js</a></li><li><a href="index.html#T000002R001071">bin/download.js</a></li><li><a href="index.html#T000002R001089">bin/init.js</a></li><li><a href="index.html#T000002R001061">bin/sync-all.js</a></li><li><a href="index.html#T000002R001066">bin/sync-test.js</a></li><li><a href="index.html#T000002R000978">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001017">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001035">qa-scripts/studio-monitor.js</a></li></ul>
 </nav>
 
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Mon Aug 03 2015 17:42:48 GMT+0200 (Paris, Madrid (heure d’été))
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Wed Sep 02 2015 17:46:01 GMT+0200 (Paris, Madrid (heure d’été))
 </footer>
 
 <script> prettyPrint(); </script>
