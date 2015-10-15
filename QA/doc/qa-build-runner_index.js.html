@@ -59,9 +59,30 @@ var fs = require('fs-extra'),
     seleniumProxy = require('../qa-selenium-proxy'),
     serverRunningTimeout,
     studioRunningTimeout,
-    BuildRunner = function() {};
+    reconnectTimeout,
+    reconnectOnError = true,
+    __token,
+    BuildRunner = function() {
+        this.__token = (new Date()).getTime();
+    };
 
 BuildRunner.prototype = Object.create(require('events').EventEmitter.prototype);
+
+BuildRunner.prototype.isInterrupted = function() {
+    if (global.QAInterrupted === undefined) {
+        global.QAInterrupted = false;
+    }
+    return (global.QAInterrupted === true);
+};
+
+BuildRunner.prototype.setInterrupted = function(interrupted) {
+    if (typeof interrupted !== 'boolean') {
+        throw new TypeError('interrupted argument must be a boolean');
+    }
+    global.QAInterrupted = interrupted;
+
+    return this;
+};
 
 /** 
  * @function module:BuildRunner.setTimeout
@@ -144,7 +165,7 @@ BuildRunner.prototype.setStudioTimeoutMultiplier = function(multiplier) {
  */
 BuildRunner.prototype.getTimeout = function() {
     if (this.priv_timeout === undefined) {
-        this.priv_timeout = 2 * 60 * 1000;
+        this.priv_timeout = 5 * 60 * 1000;
     }
 
     return this.priv_timeout;
@@ -417,6 +438,7 @@ BuildRunner.prototype.startWakandaServerCLI = function(changelist, script, stabl
         command = '',
         serverProcess;
 
+    self.setInterrupted(false);
     clearTimeout(serverRunningTimeout);
     if (!sh.test('-f', script)) {
         if (typeof cb === 'function') {
@@ -460,6 +482,7 @@ BuildRunner.prototype.startWakandaServerCLI = function(changelist, script, stabl
                         self.emit('wakanda cli stdout', data, serverProcess, changelist, script);
                         clearTimeout(serverRunningTimeout);
                         serverRunningTimeout = setTimeout(function(self) {
+                        	self.setInterrupted(true);
                             self.stopWakandaServerCLI('timeout');
                         }, self.getTimeout() * self.getCLITimeoutMultiplier(), self);
                         serverProcess.stdout.on('data', function(data) {
@@ -467,6 +490,7 @@ BuildRunner.prototype.startWakandaServerCLI = function(changelist, script, stabl
                             self.emit('wakanda cli stdout', data, serverProcess, changelist, script);
                             clearTimeout(serverRunningTimeout);
                             serverRunningTimeout = setTimeout(function(self) {
+                            	self.setInterrupted(true);
                                 self.stopWakandaServerCLI('timeout');
                             }, self.getTimeout() * self.getCLITimeoutMultiplier(), self);
                         });
@@ -475,12 +499,13 @@ BuildRunner.prototype.startWakandaServerCLI = function(changelist, script, stabl
                         self.emit('wakanda cli stderr', data.toString().trim(), serverProcess, changelist, script);
                         clearTimeout(serverRunningTimeout);
                         serverRunningTimeout = setTimeout(function(self) {
+                        	self.setInterrupted(true);
                             self.stopWakandaServerCLI('timeout');
                         }, self.getTimeout() * self.getCLITimeoutMultiplier(), self);
                     });
                     serverProcess.once('exit', function(code) {
                         clearTimeout(serverRunningTimeout);
-                        self.emit('wakanda cli stopped', null, code.toString(), changelist, script);
+                        self.emit('wakanda cli stopped', null, code ? code.toString() : null, changelist, script);
                     });
                 } catch (e) {
                     clearTimeout(serverRunningTimeout);
@@ -541,13 +566,16 @@ BuildRunner.prototype.startWakandaServerCLI = function(changelist, script, stabl
  * @property {object} client - WebSocket client
  */
 function tryToConnectToServer(self, serverProcess, changelist, cb, tries) {
-    if (tries &lt; 60) {
+    clearTimeout(reconnectTimeout);
+    if (tries &lt; 400) {
         var clientWS = ws.connect('ws://127.0.0.1:8080/remote_admin_ws/', {
             rejectUnauthorized: false
         });
         clientWS.once('text', function(data) {
+            reconnectOnError = false;
         	if (/"wakandaServerIsAvailable"\s?:\s?false/i.test(data) === false) {
-        		self.reconductWakandaServerTimeout('remote_admin_ws');
+        		reconnectOnError = true;
+                self.reconductWakandaServerTimeout('remote_admin_ws');
 	            if (typeof cb === 'function') {
 	                cb(null, data, clientWS, serverProcess);
 	            } else {
@@ -571,10 +599,14 @@ function tryToConnectToServer(self, serverProcess, changelist, cb, tries) {
 	                    }, clientWS, serverProcess, changelist);
 	                }
 	            });
-        	}
+        	} else {
+                reconnectTimeout = setTimeout(tryToConnectToServer, 50, self, serverProcess, changelist, cb, tries + 1);
+            }
         });
-        clientWS.once('error', function() {
-            setTimeout(tryToConnectToServer, 500, self, serverProcess, changelist, cb, tries + 1);
+        clientWS.once('error', function(err) {
+            if (reconnectOnError === true) {
+                reconnectTimeout = setTimeout(tryToConnectToServer, 50, self, serverProcess, changelist, cb, tries + 1);
+            }
         });
     } else {
         if (typeof cb === 'function') {
@@ -606,7 +638,7 @@ BuildRunner.prototype.catchWakandaServer = function(cb, tries) {
 
     var self = this;
 
-    if (tries &lt; 60) {
+    if (tries &lt; 400) {
         var clientWS = ws.connect('ws://127.0.0.1:8080/remote_admin_ws/', {
             rejectUnauthorized: false
         });
@@ -639,7 +671,7 @@ BuildRunner.prototype.catchWakandaServer = function(cb, tries) {
         clientWS.once('error', function() {
             setTimeout(function(_self, _cb, _tries) {
                 _self.catchWakandaServer(_cb, _tries);
-            }, 500, self, cb, tries + 1);
+            }, 50, self, cb, tries + 1);
         });
     } else {
         if (typeof cb === 'function') {
@@ -775,10 +807,10 @@ BuildRunner.prototype.sendCommandToWakandaServer = function(command, args, clien
  */
 BuildRunner.prototype.reconductWakandaServerTimeout = function(origin) {
     var self = this;
-
     clearTimeout(serverRunningTimeout);
     serverRunningTimeout = setTimeout(function(self) {
         self.wakandaServerProperlyExited = false;
+        self.setInterrupted(true);
         self.stopWakandaServer('timeout');
     }, self.getTimeout(), self);
 
@@ -831,6 +863,7 @@ BuildRunner.prototype.startWakandaServer = function(changelist, cb) {
         command,
         serverProcess;
 
+    self.setInterrupted(false);
     clearTimeout(serverRunningTimeout);
     self.wakandaServerProperlyExited = true;
     self.killByName('wakanda server', true, function(err) {
@@ -890,10 +923,10 @@ BuildRunner.prototype.startWakandaServer = function(changelist, cb) {
 
 /** @ignore */
 function tryToFindTheStudio(self, studioProcess, changelist, cb, tries) {
-    if (tries &lt; 60) {
+    if (tries &lt; 400) {
         self.getInfoByName('wakanda studio', function(err, data) {
             if (err) {
-                setTimeout(tryToFindTheStudio, 500, self, studioProcess, changelist, cb, tries + 1);
+                setTimeout(tryToFindTheStudio, 50, self, studioProcess, changelist, cb, tries + 1);
             } else {
                 setTimeout(function(self, studioProcess, changelist, cb, data) {
                     if (typeof cb === 'function') {
@@ -901,7 +934,8 @@ function tryToFindTheStudio(self, studioProcess, changelist, cb, tries) {
                     } else {
                         self.emit('wakanda studio started', data, studioProcess, changelist);
                     }
-                }, 5000, self, studioProcess, changelist, cb, data); // must wait a bit: about 5 seconds between the launch of the process and the launch of the UI...
+                // @FIXME
+                }, 10 * 1000, self, studioProcess, changelist, cb, data); // must wait a bit: about 10 seconds between the launch of the process and the launch of the UI...
             }
         });
     } else {
@@ -951,7 +985,7 @@ function tryToFindTheStudio(self, studioProcess, changelist, cb, tries) {
  * @property {object} client - WebSocket client
  */
 function tryToConnectToStudio(self, studioProcess, changelist, cb, tries) {
-    if (tries &lt; 60) {
+    if (tries &lt; 400) {
         var clientWS = ws.connect('ws://127.0.0.1:8079/', {
             rejectUnauthorized: false
         });
@@ -959,6 +993,7 @@ function tryToConnectToStudio(self, studioProcess, changelist, cb, tries) {
             clearTimeout(studioRunningTimeout);
             studioRunningTimeout = setTimeout(function(self) {
                 self.wakandaStudioProperlyExited = false;
+                self.setInterrupted(true);
                 self.stopWakandaStudio('timeout');
             }, self.getTimeout() * self.getStudioTimeoutMultiplier(), self);
             if (typeof cb === 'function') {
@@ -983,7 +1018,7 @@ function tryToConnectToStudio(self, studioProcess, changelist, cb, tries) {
             });
         });
         clientWS.once('error', function() {
-            setTimeout(tryToConnectToStudio, 500, self, studioProcess, changelist, cb, tries + 1);
+            setTimeout(tryToConnectToStudio, 50, self, studioProcess, changelist, cb, tries + 1);
         });
     } else {
         clearTimeout(studioRunningTimeout);
@@ -1106,6 +1141,7 @@ BuildRunner.prototype.startWakandaStudio = function(changelist, cb) {
         command,
         studioProcess;
 
+    self.setInterrupted(false);
     clearTimeout(studioRunningTimeout);
     self.wakandaStudioProperlyExited = true;
     self.killByName('wakanda studio', true, function(err) {
@@ -1127,6 +1163,7 @@ BuildRunner.prototype.startWakandaStudio = function(changelist, cb) {
                     clearTimeout(studioRunningTimeout);
                     studioRunningTimeout = setTimeout(function(self) {
                         self.wakandaStudioProperlyExited = false;
+                        self.setInterrupted(true);
                         self.stopWakandaStudio('timeout');
                     }, self.getTimeout() * self.getStudioTimeoutMultiplier(), self);
                 });
@@ -1135,12 +1172,13 @@ BuildRunner.prototype.startWakandaStudio = function(changelist, cb) {
                     clearTimeout(studioRunningTimeout);
                     studioRunningTimeout = setTimeout(function(self) {
                         self.wakandaStudioProperlyExited = false;
+                        self.setInterrupted(true);
                         self.stopWakandaStudio('timeout');
                     }, self.getTimeout() * self.getStudioTimeoutMultiplier(), self);
                 });
                 studioProcess.once('exit', function(code) {
                     if (self.wakandaStudioProperlyExited === true) {
-                        self.emit('wakanda studio stopped', null, code.toString(), changelist);
+                        self.emit('wakanda studio stopped', null, code ? code.toString(): null, changelist);
                     }
                 });
                 tryToConnectToStudio(self, studioProcess, changelist, cb, 0);
@@ -1194,10 +1232,10 @@ BuildRunner.prototype.startWakandaStudio = function(changelist, cb) {
  * @property {object} error - The error
  */
 function tryToFind4DServer(self, fourdProcess, changelist, base, cb, tries) {
-    if (tries &lt; 60) {
+    if (tries &lt; 400) {
         self.getInfoByName('4d server', function(err, data) {
             if (err) {
-                setTimeout(tryToFind4DServer, 500, self, fourdProcess, changelist, base, cb, tries + 1);
+                setTimeout(tryToFind4DServer, 50, self, fourdProcess, changelist, base, cb, tries + 1);
             } else {
                 setTimeout(function(self, fourdProcess, changelist, base, cb, data) {
                     if (typeof cb === 'function') {
@@ -1205,6 +1243,7 @@ function tryToFind4DServer(self, fourdProcess, changelist, base, cb, tries) {
                     } else {
                         self.emit('4d server started', data, fourdProcess, changelist, base);
                     }
+                // @FIXME
                 }, 10 * 1000, self, fourdProcess, changelist, base, cb, data); // must wait a bit: like 10 seconds between the launch of the process and the launch of the UI...
             }
         });
@@ -1249,13 +1288,13 @@ BuildRunner.prototype.check4DServerReady = function(tries, url, expected) {
     if (expected === undefined) {
         expected = 'server started';
     }
-    if (tries &lt; 60) {
+    if (tries &lt; 400) {
         request({
             method: 'GET',
             url: url
         }, function(err, response, data) {
             if (err) {
-                setTimeout(self.check4DServerReady, 500, tries + 1);
+                setTimeout(self.check4DServerReady, 50, tries + 1);
             } else {
                 if (data.toString().trim().toLowerCase() === expected) {
                     self.emit('4d server ready');
@@ -1321,6 +1360,7 @@ BuildRunner.prototype.start4DServer = function(changelist, base, cb) {
         command,
         fourdProcess;
 
+    self.setInterrupted(false);
     self.killByName('4d server', true, function(err) {
         if (!err || err === 'process not found') {
             command = resolveCommand('4d server', config.getCurrentWakandaBranch(), changelist);
@@ -1450,7 +1490,6 @@ BuildRunner.prototype.stopWakandaServer = function(reason, cb) {
     }
 
     var self = this;
-
     self.killByName('wakanda server', true, function(err) {
         if (err) {
             if (typeof cb === 'function') {
@@ -1590,32 +1629,32 @@ function prepareCommand(command) {
             if (config.isWindows()) {
                 command = /wakanda[a-z\s]*server\.exe[^\\]*$/i;
             } else if (config.isMac()) {
-                command = /wakanda[a-z\s]*server[^\/]*$/i;
+                command = /wakanda[a-z\s]*server\.app/igm;
             } else {
-                command = /wakanda-[a-z]*-?server[^\/]*$/i;
+                command = /wakanda-[a-z]*-?server[^\/]*$/igm;
             }
             break;
         case 'wakanda studio':
             if (config.isWindows()) {
                 command = /wakanda[a-z\s]*studio\.exe[^\\]*$/i;
             } else if (config.isMac()) {
-                command = /wakanda[a-z\s]*studio[^\/]*$/i;
+                command = /wakanda[a-z\s]*studio\.app/igm;
             }
             break;
         case 'wakanda all':
             if (config.isWindows()) {
                 command = /wakanda[a-z\s]*(server|studio)\.exe[^\\]*$/i;
             } else if (config.isMac()) {
-                command = /wakanda[a-z\s]*(server|studio)[^\/]*$/i;
+                command = /wakanda[a-z\s]*(server|studio)\.app/igm;
             } else {
-                command = /wakanda-[a-z]*-?server[^\/]*$/i;
+                command = /wakanda-[a-z]*-?server[^\/]*$/igm;
             }
             break;
         case '4d server':
             if (config.isWindows()) {
                 command = /4d[a-z\s]*server\.exe[^\\]*$/i;
             } else if (config.isMac()) {
-                command = /4d[a-z\s]*server[^\/]*$/i;
+                command = /4d[a-z\s]*server\.app/igm;
             }
             break;
     }
@@ -1664,29 +1703,37 @@ BuildRunner.prototype.getInfoByName = function(command, cb) {
     preparedCommand = prepareCommand(command);
 
     if (config.isWindows()) {
-        ps.lookup({
-            command: preparedCommand,
-        }, function(err, processes) {
-            if (err) {
-                if (typeof cb === 'function') {
-                    cb(err, preparedCommand);
+        try {
+            ps.lookup({
+                command: preparedCommand,
+            }, function(err, processes) {
+                if (err) {
+                    if (typeof cb === 'function') {
+                        cb(err, preparedCommand);
+                    } else {
+                        self.emit('info by name error', err, command, preparedCommand);
+                    }
+                } else if (processes.length === 0) {
+                    if (typeof cb === 'function') {
+                        cb('process not found', preparedCommand);
+                    } else {
+                        self.emit('info by name error', 'process not found', command, preparedCommand);
+                    }
                 } else {
-                    self.emit('info by name error', err, command, preparedCommand);
+                    if (typeof cb === 'function') {
+                        cb(null, processes, preparedCommand);
+                    } else {
+                        self.emit('info by name', processes, command, preparedCommand);
+                    }
                 }
-            } else if (processes.length === 0) {
-                if (typeof cb === 'function') {
-                    cb('process not found', preparedCommand);
-                } else {
-                    self.emit('info by name error', 'process not found', command, preparedCommand);
-                }
+            });
+        } catch (e) {
+            if (typeof cb === 'function') {
+                cb('process not found', preparedCommand);
             } else {
-                if (typeof cb === 'function') {
-                    cb(null, processes, preparedCommand);
-                } else {
-                    self.emit('info by name', processes, command, preparedCommand);
-                }
+                self.emit('info by name error', 'process not found', command, preparedCommand);
             }
-        });
+        }
     } else {
         ChildProcess.exec('ps auxwwww', function(err, stdout, stderr) { // oh, those damn spaces...
             var processes = [];
@@ -1698,7 +1745,7 @@ BuildRunner.prototype.getInfoByName = function(command, cb) {
                 }
             } else {
                 stdout.toString().split(/\r?\n/).forEach(function(item) {
-                    if (preparedCommand.test(item) === true) {
+                    if (preparedCommand &amp;&amp; typeof preparedCommand.test === 'function' &amp;&amp; preparedCommand.test(item) === true) {
                         item = item.split(/\s+/);
                         processes.push({
                             pid: parseInt(item[1]),
@@ -1765,29 +1812,37 @@ BuildRunner.prototype.getInfoByPID = function(pid, cb) {
 
     var self = this;
 
-    ps.lookup({
-        pid: pid,
-    }, function(err, processes) {
-        if (err) {
-            if (typeof cb === 'function') {
-                cb(err);
+    try {
+        ps.lookup({
+            pid: String(pid),
+        }, function(err, processes) {
+            if (err) {
+                if (typeof cb === 'function') {
+                    cb(err);
+                } else {
+                    self.emit('info by pid error', err, pid);
+                }
+            } else if (processes.length === 0) {
+                if (typeof cb === 'function') {
+                    cb('process not found');
+                } else {
+                    self.emit('info by pid error', 'process not found', pid);
+                }
             } else {
-                self.emit('info by pid error', err, pid);
+                if (typeof cb === 'function') {
+                    cb(null, processes);
+                } else {
+                    self.emit('info by pid', processes, pid);
+                }
             }
-        } else if (processes.length === 0) {
-            if (typeof cb === 'function') {
-                cb('process not found');
-            } else {
-                self.emit('info by pid error', 'process not found', pid);
-            }
+        });
+    } catch (e) {
+        if (typeof cb === 'function') {
+            cb('process not found');
         } else {
-            if (typeof cb === 'function') {
-                cb(null, processes);
-            } else {
-                self.emit('info by pid', processes, pid);
-            }
+            self.emit('info by pid error', 'process not found', pid);
         }
-    });
+    }
 
     return this;
 };
@@ -1827,7 +1882,6 @@ BuildRunner.prototype.killAll = function(force, cb) {
 
     var self = this,
         commands = ['wakanda server', 'wakanda studio', '4d server'];
-
     async.eachSeries(
         commands,
         function(command, serieCallback) {
@@ -1959,6 +2013,7 @@ BuildRunner.prototype.killByName = function(command, force, cb) {
  * @property {object} error - The error
  */
 BuildRunner.prototype.killByPID = function(pid, force, cb) {
+    var _____tok = (new Date()).getTime();
     if (typeof pid !== 'number') {
         throw new TypeError('pid argument must be a number');
     }
@@ -1977,26 +2032,66 @@ BuildRunner.prototype.killByPID = function(pid, force, cb) {
     }
 
     var self = this;
-
-    if (pid > 0 &amp;&amp; pid !== process.pid) {
-        if (force === false || config.isWindows()) {
-            ps.kill(pid, function(err) {
-                if (err) {
-                    if (typeof cb === 'function') {
-                        cb(err);
-                    } else {
-                        self.emit('kill by pid error', err, pid, force);
+    if (pid &amp;&amp; pid !== process.pid) {
+        try {
+            ps.lookup({ pid: String(pid) }, function(err, reslist) {
+                if (force === false || config.isWindows()) {
+                    try {
+                        ps.kill(pid, function(err) {
+                            var count;
+                            if (err) {
+                                if (typeof cb === 'function') {
+                                    cb(err);
+                                } else {
+                                    self.emit('kill by pid error', err, pid, force);
+                                }
+                            } else {
+                                count = 0;
+                                async.during(
+                                    function (callback) {
+                                        try {
+                                            ps.lookup({ pid: String(pid) }, function(err, resultList ) {
+                                                var process = resultList[0];
+                                                if (process &amp;&amp; count &lt; 200) {
+                                                    return callback(null, true);
+                                                }
+                                                return callback(null, false);
+                                            });
+                                        } catch (e) {
+                                            return callback(null, false);
+                                        }                         
+                                    },
+                                    function (callback) {
+                                        count++;
+                                        setTimeout(callback, 50);
+                                    },
+                                    function (err) {
+                                        if (typeof cb === 'function') {
+                                            cb(null);
+                                        } else {
+                                            self.emit('killed by pid', pid, force);
+                                        }
+                                    }
+                                );
+                            }
+                        });
+                    } catch (e) {
+                        if (typeof cb === 'function') {
+                            cb(e);
+                        } else {
+                            self.emit('kill by pid error', e, pid, force);
+                        }
                     }
                 } else {
-                    if (typeof cb === 'function') {
-                        cb(null);
-                    } else {
-                        self.emit('killed by pid', pid, force);
-                    }
-                }
+                    forceKill(self, pid, cb);
+                } 
             });
-        } else {
-            forceKill(self, pid, cb);
+        } catch (e) {
+            if (typeof cb === 'function') {
+                cb(e);
+            } else {
+                self.emit('kill by pid error', e, pid, force);
+            }
         }
     } else {
         if (typeof cb === 'function') {
@@ -2023,6 +2118,7 @@ BuildRunner.prototype.killByPID = function(pid, force, cb) {
 function forceKill(emitter, pid, cb) {
     if (pid > 0 &amp;&amp; pid !== process.pid) {
         ChildProcess.exec('kill -9 ' + pid, function(err, stdout, stderr) {
+            var count;
             if (err || stderr) {
                 if (typeof cb === 'function') {
                     cb(err || stderr.toString());
@@ -2030,11 +2126,33 @@ function forceKill(emitter, pid, cb) {
                     emitter.emit('kill by pid error', err || stderr.toString(), pid, true);
                 }
             } else {
-                if (typeof cb === 'function') {
-                    cb(null);
-                } else {
-                    emitter.emit('killed by pid', pid, true);
-                }
+                count = 0;
+                async.during(
+                    function (callback) {
+                        try {
+                            ps.lookup({ pid: String(pid) }, function(err, resultList ) {
+                                var process = resultList[0];
+                                if (process &amp;&amp; count &lt; 200) {
+                                    return callback(null, true);
+                                }
+                                return callback(null, false);
+                            });
+                        } catch (e) {
+                            return callback(null, false);
+                        }                            
+                    },
+                    function (callback) {
+                        count++;
+                        setTimeout(callback, 50);
+                    },
+                    function (err) {
+                        if (typeof cb === 'function') {
+                            cb(null);
+                        } else {
+                            self.emit('killed by pid', pid, true);
+                        }
+                    }
+                );
             }
         });
     } else {
@@ -2056,13 +2174,13 @@ module.exports = BuildRunner;</code></pre>
 </div>
 
 <nav>
-    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestReporter.html">TestReporter</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001052">bin/clean.js</a></li><li><a href="index.html#T000002R001071">bin/download.js</a></li><li><a href="index.html#T000002R001089">bin/init.js</a></li><li><a href="index.html#T000002R001061">bin/sync-all.js</a></li><li><a href="index.html#T000002R001066">bin/sync-test.js</a></li><li><a href="index.html#T000002R000978">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001017">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001035">qa-scripts/studio-monitor.js</a></li></ul>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestReporter.html">TestReporter</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001136">bin/clean.js</a></li><li><a href="index.html#T000002R001155">bin/download.js</a></li><li><a href="index.html#T000002R001173">bin/init.js</a></li><li><a href="index.html#T000002R001145">bin/sync-all.js</a></li><li><a href="index.html#T000002R001150">bin/sync-test.js</a></li><li><a href="index.html#T000002R001062">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001101">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001119">qa-scripts/studio-monitor.js</a></li></ul>
 </nav>
 
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Wed Sep 02 2015 17:46:01 GMT+0200 (Paris, Madrid (heure d’été))
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Thu Oct 15 2015 13:38:04 GMT+0200 (Paris, Madrid (heure d’été))
 </footer>
 
 <script> prettyPrint(); </script>

@@ -34,17 +34,115 @@
  * @requires module:Config
  * @requires async
  * @requires path
+ * @requires fs-extra
  * @requires xml2js
  */
 
 var Config = require('../qa-config'),
-    async = require('async'),
-    path = require('path'),
+	async = require('async'),
+	fs = require('fs-extra'),
+	path = require('path'),
+	colors = require('colors/safe'),
 	parseString = require('xml2js').parseString,
-    moduleBasePath = path.dirname(module.filename),
-    TestReporter = function() {};
+	moduleBasePath = path.dirname(module.filename),
+	TestReporter = function() {};
 
 TestReporter.prototype = Object.create(require('events').EventEmitter.prototype);
+
+function parseXmlReport(source, destination, cb) {
+	parseString(source, function(err, rawresult) {
+		if (err) {
+			console.log('Error: cannot parse XML report', err);
+			cb(err, destination);
+		} else if (rawresult.testsuites !== undefined &amp;&amp; rawresult.testsuites['$'] !== undefined &amp;&amp; rawresult.testsuites['$'].tests !== undefined &amp;&amp; rawresult.testsuites['$'].passed !== undefined &amp;&amp; rawresult.testsuites['$'].failures !== undefined) {
+			destination.abstract = {};
+			try {
+				destination.abstract.total = parseInt(rawresult.testsuites['$'].tests, 10);
+			} catch (e) {
+				destination.abstract.total = 0;
+			}
+			try {
+				destination.abstract.failed = parseInt(rawresult.testsuites['$'].failures, 10);
+			} catch (e) {
+				destination.abstract.failed = 0;
+			}
+			try {
+				destination.abstract.skipped = parseInt(rawresult.testsuites['$'].skipped, 10);
+			} catch (e) {
+				destination.abstract.skipped = 0;
+			}
+			try {
+				destination.abstract.passed = parseInt(rawresult.testsuites['$'].passed, 10);
+			} catch (e) {
+				destination.abstract.passed = 0;
+			}
+			if ((destination.abstract.total - destination.abstract.skipped) > 0) {
+				destination.success = parseInt(((destination.abstract.total - destination.abstract.failed - destination.abstract.skipped) / (destination.abstract.total - destination.abstract.skipped)) * 100, 10);
+			} else {
+				destination.success = 0;
+			}
+			if (destination.success === 0 || isNaN(destination.success)) {
+				destination.status = 'failed';
+				destination.success = 0;
+			} else if (destination.success === 100) {
+				destination.status = 'passed';
+			} else {
+				destination.status = 'unstable';
+			}
+			destination.passed = [];
+			destination.failed = [];
+			destination.skipped = [];
+			// @TODO specific parsing for Maven tests é_è
+			rawresult.testsuites.testsuite[0].testcase.forEach(function(testcase) {
+				if (typeof testcase.failure !== 'undefined') {
+					destination.failed.push({
+						name: testcase['$'].name,
+						failure: testcase.failure[0]['$'].message,
+						time: parseInt(testcase['$'].time)
+					});
+				} else if (typeof testcase.error !== 'undefined') {
+					destination.failed.push({
+						name: testcase['$'].name,
+						failure: testcase.error[0]['$'].message,
+						time: parseInt(testcase['$'].time)
+					});
+				} else if (typeof testcase.skipped !== 'undefined') {
+					destination.skipped.push({
+						name: testcase['$'].name
+					});
+				} else {
+					destination.passed.push({
+						name: testcase['$'].name,
+						time: parseInt(testcase['$'].time)
+					});
+				}
+			});
+			cb(null, destination);
+		} else {
+			console.log('Error: XML report incomplete or malformed');
+			cb('malformed', destination);
+		}
+	});
+}
+
+function writeReport(report, runner, test_path, cb) {
+	var report_path = path.join(global.qaConfig.resultsDir, runner.getTestNameFromTestPath(test_path));
+	fs.ensureDir(report_path, function(err) {
+		if (err) {
+			cb(err);
+		} else {
+			fs.emptyDir(report_path, function(err) {
+				if (err) {
+					cb(err);
+				} else {
+					fs.writeJson(path.join(report_path, 'report.json'), report, function(err) {
+						cb(err);
+					});
+				}
+			});
+		}
+	});
+}
 
 /** 
  * @function module:TestReporter.report
@@ -52,66 +150,163 @@ TestReporter.prototype = Object.create(require('events').EventEmitter.prototype)
  * @returns {module:TestReporter}
  */
 TestReporter.prototype.report = function(err, result, runner, test, test_path, working_path, testConfig, isOldFashioned, changelist, branch, cb) {
-	var i,
-        success;
+	var hasReport = false,
+		finalReports = [];
+	fs.ensureDir(__dirname + '/../logs', function() {
+		if (result &amp;&amp; result.GLOBAL !== undefined &amp;&amp; result.GLOBAL.start !== undefined) {
+			result.GLOBAL.end = new Date();
+		}
 
-    if (result &amp;&amp; result.GLOBAL !== undefined &amp;&amp; result.GLOBAL.start !== undefined) {
-        result.GLOBAL.end = new Date();
-    }
+		if (testConfig.reporter === undefined) {
+			if (testConfig.bench !== undefined &amp;&amp; testConfig.bench === true) {
+				testConfig.reporter = 'csv';
+			} else {
+				testConfig.reporter = 'xml';
+			}
+		}
 
-    if (testConfig.reporter === undefined) {
-        if (testConfig.bench !== undefined &amp;&amp; testConfig.bench === true) {
-            testConfig.reporter = 'csv';
-        } else {
-            testConfig.reporter = 'xml';
-        }                
-    }
+		if (err) {
+			console.log(colors.red.bold('Error'));
+			console.log(colors.red(err));
+		}
 
-    for (i in result) {
-        if (i !== 'GLOBAL') {
-            if (result[i].report === null || result[i].reportIsErroneous === true) {
-                result[i].status = 'crashed';
-                result[i].success = 0;
-            } else {
-                switch (testConfig.reporter.toLowerCase()) {
-                    case 'junit':
-                    case 'xml':
-                        try {
-                            success = parseInt(/success\s?=\s?'?"?([0-9]*\.?[0-9]+)%'?"?/gim.exec(result[i].report)[1], 10);
-                        } catch (e) {
-                            success = 0;
-                        }
-                        if (success === 0 || isNaN(success)) {
-                            result[i].status = 'failed';
-                            result[i].success = 0;
-                        } else if (success === 100) {
-                            result[i].status = 'passed';
-                            result[i].success = 0;
-                        } else {
-                            result[i].status = 'unstable';
-                            result[i].success = success;
-                        }
-                        break;
-                    case 'csv':
-                        success = /0$/gm.test(result[i].report);
-                        result[i].status = success ? 'passed' : 'failed';
-                        result[i].success = success ? 100 : 0;
-                        break;
-                    default:
-                        // @TODO: html, json
-                        result[i].status = 'unknown';
-                        result[i].success = null;
-                        break;
-                }
-            }
-        }
-    }
-    // @TODO Formatted the result, and so on
-    if (typeof cb === 'function') {
-        cb(err, result);
-    } else {
-        runner.emit('test end', err, result, test_path, working_path, testConfig, isOldFashioned, changelist, branch, test);
-    }
+		if (result) {
+			console.log('\nTest ' + colors.bold(test) + ' done in ' + ((result.GLOBAL.end.getTime() - result.GLOBAL.start.getTime()) / 1000).toFixed(2) + ' seconds');
+			if (result.GLOBAL &amp;&amp; result.GLOBAL.artifacts) {
+				// console.log('\t- Artifacts:', result.GLOBAL.artifacts);
+			}
+			async.forEachOf(
+				result,
+				function(resultEntryData, resultEntryName, resultSerieCallback) {
+					var testName,
+						success,
+						finalReport = null;
+					if (resultEntryName !== 'GLOBAL') {
+						testName = resultEntryName.replace(/\.js$/i, '');
+						finalReport = {
+							name: testName.split('/').slice(1).join('/'),
+							suite: test,
+							config: testConfig,
+							path: test_path,
+							working_path: working_path,
+							changelist: changelist,
+							branch: branch,
+							deprecated: isOldFashioned,
+							start: (resultEntryData.start ? resultEntryData.start : null),
+							end: (resultEntryData.end ? resultEntryData.end : null),
+							duration: (resultEntryData.start &amp;&amp; resultEntryData.end ? resultEntryData.end.getTime() - resultEntryData.start.getTime() : null),
+							bench: (resultEntryData.reportIsBench ? true : false),
+							status: 'unknown'
+						};
+						if (resultEntryData.report === undefined || resultEntryData.report === null) {
+							finalReport.status = 'crashed';
+							finalReport.success = 0;
+							console.log('\t- Test suite ' + colors.bold(testName) + ' ' + colors.red.inverse(' CRASHED '));
+							// console.log(finalReport) //@TODO STACK + result.GLOBAL.artifacts
+							resultSerieCallback();
+						} else {
+							hasReport = true;
+							async.series([
+									function(seriesCallback) {
+										switch (testConfig.reporter.toLowerCase()) {
+											case 'junit':
+											case 'xml':
+												parseXmlReport(resultEntryData.report.toString(), finalReport, function(err, report) {
+													finalReport = report;
+													finalReport.reportIsErroneous = err ? true : false;
+													seriesCallback();
+												});
+												break;
+											case 'csv':
+												success = /0$/gm.test(resultEntryData.report);
+												finalReport.status = success ? 'passed' : 'failed';
+												finalReport.success = success ? 100 : 0;
+												finalReport.abstract = {};
+												finalReport.abstract.passed = success ? 1 : 0;
+												finalReport.abstract.failed = success ? 0 : 1;
+												finalReport.abstract.skipped = 0;
+												finalReport.total = 1;
+												seriesCallback();
+												break;
+											default:
+												// @TODO: html, json
+												finalReport.status = 'unknown';
+												finalReport.success = null;
+												finalReport.abstract = {};
+												finalReport.abstract.passed = null;
+												finalReport.abstract.failed = null;
+												finalReport.abstract.skipped = null;
+												finalReport.total = null;
+												seriesCallback();
+												break;
+										}
+									},
+									function(seriesCallback) {
+										if (finalReport.reportIsErroneous) {
+											console.log('\t- Test suite ' + colors.bold(testName) + ' produced an ' + colors.red.inverse(' ERRONEOUS REPORT '));
+										} else {
+											switch (finalReport.status.toLowerCase()) {
+												case 'passed':
+													console.log('\t- Test suite ' + colors.bold(testName) + ' ' + colors.green.inverse(' PASSED '));
+													break;
+												case 'unstable':
+													console.log('\t- Test suite ' + colors.bold(testName) + ' is ' + colors.yellow.inverse(' UNSTABLE ') + ' (' + finalReport.success + '% of success)');
+													finalReport.failed.forEach(function (failure) {
+														console.log('\t  * ' + failure.name);
+														console.log('\t    -> ' + colors.red(failure.failure.trim().replace(/[\s\r\n]+/gm, ' ')));
+													});
+													console.log();
+													break;
+												case 'failed':
+													console.log('\t- Test suite ' + colors.bold(testName) + ' ' + colors.red.inverse(' FAILED '));
+													break;
+												default:
+													console.log('\t- Test suite ' + colors.bold(testName) + ' returned an ' + colors.yellow.inverse(' UNKOWN STATUS ') + ': ' + finalReport.status);
+													break;
+											}
+											if (finalReport.bench) {
+												// console.log(resultEntryData.report);
+											}
+										}
+										seriesCallback();
+									}
+								],
+								function() {
+									finalReports.push(finalReport);
+									// console.log(finalReport) //@TODO STACK + result.GLOBAL.artifacts
+									resultSerieCallback();
+								});
+						}
+					} else {
+						resultSerieCallback();
+					}
+				},
+				function(e) {
+					if (hasReport === false) {
+						console.log(colors.red.inverse(' NO RESULT '));
+					}
+					console.log();
+					writeReport(finalReports, runner, test_path, function(err) {
+						if (typeof cb === 'function') {
+							cb(err, result);
+						} else {
+							runner.emit('test end', err, result, test_path, working_path, testConfig, isOldFashioned, changelist, branch, test);
+						}
+					});
+				}
+			);
+		} else {
+			console.log(colors.red.inverse(' NO RESULT '));
+			console.log();
+			writeReport(finalReports, runner, test_path, function(err) {
+				if (typeof cb === 'function') {
+					cb(err, result);
+				} else {
+					runner.emit('test end', err, result, test_path, working_path, testConfig, isOldFashioned, changelist, branch, test);
+				}
+			});
+		}
+	});
 	return this;
 };
 
@@ -125,13 +320,13 @@ module.exports = TestReporter;</code></pre>
 </div>
 
 <nav>
-    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestReporter.html">TestReporter</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001052">bin/clean.js</a></li><li><a href="index.html#T000002R001071">bin/download.js</a></li><li><a href="index.html#T000002R001089">bin/init.js</a></li><li><a href="index.html#T000002R001061">bin/sync-all.js</a></li><li><a href="index.html#T000002R001066">bin/sync-test.js</a></li><li><a href="index.html#T000002R000978">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001017">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001035">qa-scripts/studio-monitor.js</a></li></ul>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestReporter.html">TestReporter</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001136">bin/clean.js</a></li><li><a href="index.html#T000002R001155">bin/download.js</a></li><li><a href="index.html#T000002R001173">bin/init.js</a></li><li><a href="index.html#T000002R001145">bin/sync-all.js</a></li><li><a href="index.html#T000002R001150">bin/sync-test.js</a></li><li><a href="index.html#T000002R001062">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001101">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001119">qa-scripts/studio-monitor.js</a></li></ul>
 </nav>
 
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Wed Sep 02 2015 17:46:01 GMT+0200 (Paris, Madrid (heure d’été))
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Thu Oct 15 2015 13:38:04 GMT+0200 (Paris, Madrid (heure d’été))
 </footer>
 
 <script> prettyPrint(); </script>

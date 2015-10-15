@@ -54,7 +54,9 @@ var fs = require('fs-extra'),
     glob = require('glob'),
     moduleBasePath = path.dirname(module.filename),
     parseString = require('xml2js').parseString,
-    TestRunner = function() {},
+    TestRunner = function() {
+        this.__token = (new Date()).getTime();
+    },
     runner = null,
     pids = [],
     globalTimeout = null;
@@ -67,13 +69,13 @@ TestRunner.prototype = Object.create(require('events').EventEmitter.prototype);
  * @returns {module:TestRunner}
  * @fires module:TestRunner#heartbeat
  */
- /**
+/**
  * heartbeat event
  *
  * @event module:TestRunner#heartbeat
  * @type {object}
  */
-TestRunner.prototype.enableRemoteHandler = function () {
+TestRunner.prototype.enableRemoteHandler = function() {
     var self = this;
 
     if (global.qaHTTPApplication !== undefined &amp;&amp; global.qaRemoteHandlerDefined !== undefined &amp;&amp; global.qaRemoteHandlerEnabled !== undefined) {
@@ -88,7 +90,7 @@ TestRunner.prototype.enableRemoteHandler = function () {
                     res.send('done');
                 } else {
                     res.send('denied');
-                }                
+                }
             });
             global.qaHTTPApplication.get('/removePID/:pid', function(req, res) {
                 if (global.qaRemoteHandlerEnabled === true) {
@@ -121,7 +123,7 @@ TestRunner.prototype.enableRemoteHandler = function () {
  * @description Disable the HTTP remote handler.
  * @returns {module:TestRunner}
  */
-TestRunner.prototype.disableRemoteHandler = function () {
+TestRunner.prototype.disableRemoteHandler = function() {
     if (global.qaHTTPApplication !== undefined &amp;&amp; global.qaRemoteHandlerDefined !== undefined &amp;&amp; global.qaRemoteHandlerEnabled !== undefined) {
         if (global.qaRemoteHandlerDefined === true) {
             global.qaRemoteHandlerEnabled = false;
@@ -194,25 +196,34 @@ TestRunner.prototype.getPIDs = function() {
  * @param {module:TestRunner} self - Current TestRunner instance (when called through a `setTimeout`)
  * @returns {module:TestRunner}
  */
-TestRunner.prototype.killSwitch = function(self) {
+TestRunner.prototype.killSwitch = function(self, keepRunning) {
+    clearTimeout(globalTimeout);
     if (self === undefined) {
         self = this;
     }
-
+    if (keepRunning === undefined) {
+        keepRunning = false;
+    }
     var buildRunner = new BuildRunner();
-    buildRunner.killAll(true, function () {
-        self.emit('runner done', 'kill switch (timeout)', null);
+    buildRunner.setInterrupted(true);
+    buildRunner.killAll(true, function() {
+        if (!keepRunning) {
+            self.emit('runner done', 'kill switch (timeout)', null);
+        }
     });
-
     return self;
 };
 
 /** 
  * @ignore
  */
-function heartbeat(self) {
+function heartbeat(self, multiplier, keepRunning) {
     clearTimeout(globalTimeout);
-    globalTimeout = setTimeout(self.killSwitch, 5 * 60 * 1000, self);
+    if (multiplier === undefined) {
+        multiplier = 1;
+    }
+    // @FIXME have a setting per machine
+    globalTimeout = setTimeout(self.killSwitch, multiplier * 2 * 60 * 1000, self, keepRunning);
     return self;
 }
 
@@ -262,7 +273,9 @@ TestRunner.prototype.run = function(test, cb) {
         working_path,
         runner_path,
         buildRunner = new BuildRunner();
-
+    // clearTimeout(globalTimeout);
+    stopHeartbeat(self);
+    buildRunner.setInterrupted(false);
     async.eachSeries(
         self.getPIDs(),
         function(pid, serieCallback) {
@@ -272,10 +285,11 @@ TestRunner.prototype.run = function(test, cb) {
         },
         function(err) {
             self.clearPIDs();
+            buildRunner.killAll(true, function() {
             self.enableRemoteHandler();
             stopHeartbeat(self);
-            self.on('heartbeat', function () {
-                heartbeat(self);
+            self.on('heartbeat', function(multiplier, keepRunning) {
+                heartbeat(self, multiplier, keepRunning);
             });
 
             if (global.qaConfig === undefined) {
@@ -336,7 +350,7 @@ TestRunner.prototype.run = function(test, cb) {
                                                     self.emit('test not run', err, test);
                                                 }
                                             } else {
-                                                self.getTestConfig(test_path, function (err, testConfig, isOldFashioned) {
+                                                self.getTestConfig(test_path, function(err, testConfig, isOldFashioned) {
                                                     if (err) {
                                                         if (typeof cb === 'function') {
                                                             cb(err);
@@ -346,21 +360,21 @@ TestRunner.prototype.run = function(test, cb) {
                                                     } else {
                                                         runner_path = path.join(moduleBasePath, 'runners', (isOldFashioned ? 'old-' : '') + testConfig.kind);
                                                         if (testConfig['4d-base-path'] !== undefined) {
-                                                            self.once('runner done', function (err, result) {
+                                                            self.once('runner done', function(err, result) {
                                                                 stopHeartbeat(self);
                                                                 buildRunner.stop4DServer();
                                                                 wrapTest(err, result, self, test, test_path, working_path, testConfig, isOldFashioned, config.getCurrentChangelist(), config.getCurrentWakandaBranch(), cb);
                                                             });
                                                             buildRunner = new BuildRunner();
                                                             buildRunner.start4DServer(config.getCurrentChangelist(), testConfig['4d-base-path']);
-                                                            buildRunner.once('4d server started', function () {
+                                                            buildRunner.once('4d server started', function() {
                                                                 if (testConfig['4d-base-url'] !== undefined &amp;&amp; testConfig['4d-base-expected'] !== undefined) {
-                                                                     buildRunner.check4DServerReady(0, testConfig['4d-base-url'], testConfig['4d-base-expected']);
+                                                                    buildRunner.check4DServerReady(0, testConfig['4d-base-url'], testConfig['4d-base-expected']);
                                                                 } else {
-                                                                     buildRunner.check4DServerReady(0);
-                                                                 }                                                       
+                                                                    buildRunner.check4DServerReady(0);
+                                                                }
                                                             });
-                                                            buildRunner.once('4d server ready', function () {
+                                                            buildRunner.once('4d server ready', function() {
                                                                 try {
                                                                     runner = require(runner_path);
                                                                     runner.run(self, test, test_path, working_path, testConfig, config.getCurrentChangelist(), config.getCurrentWakandaBranch());
@@ -369,16 +383,16 @@ TestRunner.prototype.run = function(test, cb) {
                                                                     self.emit('runner done', e, null);
                                                                 }
                                                             });
-                                                            buildRunner.once('4d server not started', function () {
+                                                            buildRunner.once('4d server not started', function() {
                                                                 // @TODO have a flag to disable further 4D tests ? 
                                                                 self.emit('runner done', e, null);
                                                             });
-                                                            buildRunner.once('4d server not ready', function () {
+                                                            buildRunner.once('4d server not ready', function() {
                                                                 // @TODO have a flag to disable further 4D tests ? 
                                                                 self.emit('runner done', e, null);
                                                             });
                                                         } else {
-                                                            self.once('runner done', function (err, result) {
+                                                            self.once('runner done', function(err, result) {
                                                                 stopHeartbeat(self);
                                                                 wrapTest(err, result, self, test, test_path, working_path, testConfig, isOldFashioned, config.getCurrentChangelist(), config.getCurrentWakandaBranch(), cb);
                                                             });
@@ -391,7 +405,7 @@ TestRunner.prototype.run = function(test, cb) {
                                                             }
                                                         }
                                                     }
-                                                });                                      
+                                                });
                                             }
                                         });
                                     }
@@ -400,7 +414,8 @@ TestRunner.prototype.run = function(test, cb) {
                         });
                     }
                 });
-            }      
+            }
+            });
         }
     );
 
@@ -436,21 +451,21 @@ function wrapTest(err, result, self, test, test_path, working_path, testConfig, 
         reporter = new TestReporter();
 
     self.disableRemoteHandler();
-
+    runner = null;
     async.eachSeries(
         self.getPIDs(),
-        function(pid, serieCallback) {
-            buildRunner.killByPID(pid, true, function(err) {
+        function(pid, serieCallback) { //@FIXME KILL ALL ???
+            buildRunner.killByPID(pid, true, function(e) {
                 serieCallback();
             });
         },
-        function(err) {
+        function(e) {
             self.clearPIDs();
             stopHeartbeat(self);
+            buildRunner.setInterrupted(false);
             if (runner &amp;&amp; typeof runner.removeAllListeners === 'function') {
                 runner.removeAllListeners();
             }
-            runner = null;            
             reporter.report(err, result, self, test, test_path, working_path, testConfig, isOldFashioned, changelist, branch, cb);
         }
     );
@@ -482,7 +497,7 @@ TestRunner.prototype.getTestConfig = function(test_path, cb) {
     var config = new Config(),
         key;
 
-    fs.readFile(test_path, function (err, data) {
+    fs.readFile(test_path, function(err, data) {
         if (err) {
             cb(err);
         } else {
@@ -514,7 +529,7 @@ TestRunner.prototype.getTestConfig = function(test_path, cb) {
                 }
             } else if (/\.xml$/i.test(test_path) === true) {
                 try {
-                    parseString(data.toString(), function(err, rawresult) {                        
+                    parseString(data.toString(), function(err, rawresult) {
                         if (err) {
                             cb(err);
                         } else {
@@ -544,11 +559,11 @@ TestRunner.prototype.getTestConfig = function(test_path, cb) {
                             }
                             testConfig.kind = 'maven';
                             cb(null, testConfig, true);
-                        }                        
+                        }
                     });
                 } catch (e) {
                     cb(e);
-                }                
+                }
             } else {
                 cb('unknown kind for ' + test_path);
             }
@@ -571,7 +586,7 @@ TestRunner.prototype.getTestConfig = function(test_path, cb) {
  * @callback module:TestRunner~cleanTestFolderCallback
  * @param {object} error - Error returned by the method
  */
- /**
+/**
  * Success event
  *
  * @event module:TestRunner#clean test folder done
@@ -646,7 +661,7 @@ TestRunner.prototype.cleanTestFolder = function(cb) {
  * @callback module:TestRunner~cleanResultsFolderCallback
  * @param {object} error - Error returned by the method
  */
- /**
+/**
  * Success event
  *
  * @event module:TestRunner#clean results folder done
@@ -864,7 +879,7 @@ TestRunner.prototype.getTestNameFromTestPath = function(test) {
         }
         testName = testName.split(/wakanda[\\\/]+[a-z0-9]+[\\\/]+(common|server|studio)/i);
         testName = [testName[1].trim()].concat(testName[2].replace(/[\\\/]+tests[\\\/]+?/i, '').trim().split(/[\\\/]+/));
-        testName = testName.map(function (item) {
+        testName = testName.map(function(item) {
             item = item.toLowerCase();
             if (item === 'core') {
                 return 'main';
@@ -874,7 +889,7 @@ TestRunner.prototype.getTestNameFromTestPath = function(test) {
         if (/_main$/.test(testName) === false) {
             testName = testName + '_main';
         }
-    } catch (ignore) { }
+    } catch (ignore) {}
 
     return testName;
 };
@@ -1009,13 +1024,13 @@ module.exports = TestRunner;</code></pre>
 </div>
 
 <nav>
-    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestReporter.html">TestReporter</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001052">bin/clean.js</a></li><li><a href="index.html#T000002R001071">bin/download.js</a></li><li><a href="index.html#T000002R001089">bin/init.js</a></li><li><a href="index.html#T000002R001061">bin/sync-all.js</a></li><li><a href="index.html#T000002R001066">bin/sync-test.js</a></li><li><a href="index.html#T000002R000978">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001017">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001035">qa-scripts/studio-monitor.js</a></li></ul>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestReporter.html">TestReporter</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001136">bin/clean.js</a></li><li><a href="index.html#T000002R001155">bin/download.js</a></li><li><a href="index.html#T000002R001173">bin/init.js</a></li><li><a href="index.html#T000002R001145">bin/sync-all.js</a></li><li><a href="index.html#T000002R001150">bin/sync-test.js</a></li><li><a href="index.html#T000002R001062">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001101">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001119">qa-scripts/studio-monitor.js</a></li></ul>
 </nav>
 
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Wed Sep 02 2015 17:46:01 GMT+0200 (Paris, Madrid (heure d’été))
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Thu Oct 15 2015 13:38:04 GMT+0200 (Paris, Madrid (heure d’été))
 </footer>
 
 <script> prettyPrint(); </script>

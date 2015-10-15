@@ -43,8 +43,24 @@
 
 
     <section>
-        <article><p><strong>Wakanda QA Internal Tools</strong></p>
-<h2>Purpose</h2><p>The aim is to develop a single package of node.js modules that provides all the tools needed by the QA team to run the tests and report their results (either programmatically or using the command line).</p></article>
+        <article><p> <strong>Wakanda QA Internal Tools</strong></p>
+<h2>Purpose</h2><p>The aim is to develop a single package of node.js modules that provides all the tools needed by the QA team to run the tests and report their results (either programmatically or using the command line).</p>
+<h2>Installation</h2><ol>
+<li>Install <strong>node.js</strong> (&gt; 0.12) and <strong>git</strong>. Also make sure that you have a working Perforce workspace and the <code>p4</code> command line tool.</li>
+<li>Clone the repository <a href="https://github.com/Wakanda/QA.git">https://github.com/Wakanda/QA.git</a></li>
+<li>Inside the <code>QA</code> folder, execute the following commands:<ol>
+<li><code>npm install</code></li>
+<li><code>npm link</code> (or <code>sudo npm link</code> on Mac and Linux)</li>
+<li><code>qa-init</code>: this will launch the script that helps you to create the configuration file required by the test tools (should be rather self-explanatory)</li>
+</ol>
+</li>
+</ol>
+<h2>Usage</h2><ul>
+<li><code>qa-download main</code>: retrieve the latest Wakanda build available. It will be stored in the <code>builds</code> folder as defined by using the <code>qa-init</code> script. Put your custom builds there.</li>
+<li><code>qa-run &lt;test suite name&gt;</code>: run the given test suite (e.g. <code>qa-run server_ssjs_api_file_main</code>).</li>
+<li><code>qa-agent --force-run</code>: run all the test suites (excepted those you blacklisted when using the <code>qa-init</code> script).</li>
+</ul>
+<p>The results of the tests will be stored in the <code>results</code> folder as defined by using the <code>qa-init</code> script.</p></article>
     </section>
 
 
@@ -59,7 +75,7 @@
 
 <header>
     
-        <h2 id="T000002R001052">
+        <h2 id="T000002R001136">
         bin/clean.js
         </h2>
         
@@ -165,7 +181,7 @@
 
 <header>
     
-        <h2 id="T000002R001071">
+        <h2 id="T000002R001155">
         bin/download.js
         </h2>
         
@@ -268,7 +284,7 @@
 
 <header>
     
-        <h2 id="T000002R001089">
+        <h2 id="T000002R001173">
         bin/init.js
         </h2>
         
@@ -372,7 +388,7 @@
 
 <header>
     
-        <h2 id="T000002R001061">
+        <h2 id="T000002R001145">
         bin/sync-all.js
         </h2>
         
@@ -472,7 +488,7 @@
 
 <header>
     
-        <h2 id="T000002R001066">
+        <h2 id="T000002R001150">
         bin/sync-test.js
         </h2>
         
@@ -573,7 +589,7 @@
 
 <header>
     
-        <h2 id="T000002R000978">
+        <h2 id="T000002R001062">
         qa-scripts/csjs-headless.js
         </h2>
         
@@ -674,7 +690,7 @@
 
 <header>
     
-        <h2 id="T000002R001017">
+        <h2 id="T000002R001101">
         qa-scripts/rename-in-pom.js
         </h2>
         
@@ -771,7 +787,7 @@
 
 <header>
     
-        <h2 id="T000002R001035">
+        <h2 id="T000002R001119">
         qa-scripts/studio-monitor.js
         </h2>
         
@@ -862,13 +878,13 @@
 </div>
 
 <nav>
-    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestReporter.html">TestReporter</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001052">bin/clean.js</a></li><li><a href="index.html#T000002R001071">bin/download.js</a></li><li><a href="index.html#T000002R001089">bin/init.js</a></li><li><a href="index.html#T000002R001061">bin/sync-all.js</a></li><li><a href="index.html#T000002R001066">bin/sync-test.js</a></li><li><a href="index.html#T000002R000978">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001017">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001035">qa-scripts/studio-monitor.js</a></li></ul>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestReporter.html">TestReporter</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001136">bin/clean.js</a></li><li><a href="index.html#T000002R001155">bin/download.js</a></li><li><a href="index.html#T000002R001173">bin/init.js</a></li><li><a href="index.html#T000002R001145">bin/sync-all.js</a></li><li><a href="index.html#T000002R001150">bin/sync-test.js</a></li><li><a href="index.html#T000002R001062">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001101">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001119">qa-scripts/studio-monitor.js</a></li></ul>
 </nav>
 
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Wed Sep 02 2015 17:46:01 GMT+0200 (Paris, Madrid (heure d’été))
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Thu Oct 15 2015 13:38:04 GMT+0200 (Paris, Madrid (heure d’été))
 </footer>
 
 <script> prettyPrint(); </script>

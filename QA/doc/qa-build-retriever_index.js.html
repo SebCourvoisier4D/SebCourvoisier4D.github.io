@@ -310,6 +310,7 @@ BuildRetriever.prototype.cleanBuildsFolder = function(maxBuilds, cb) {
  * @param {string} product - Product (`"4d"` or `"wakanda"`)
  * @param {string} branch - Branch
  * @param {string} opsys - Operating System (`"win"`, `"mac"` or `"linux"`)
+ * @param {number} arch - architecture (32 or 64)
  * @param {number} changelist - Previous changelist (the method will look for a build with a changelist greater than the given one)
  * @param {module:BuildRetriever~checkTeamCityCallback} cb - Optional callback
  * @returns {module:BuildRetriever}
@@ -317,6 +318,7 @@ BuildRetriever.prototype.cleanBuildsFolder = function(maxBuilds, cb) {
  * @throws {TypeError} product argument must be a string
  * @throws {TypeError} branch argument must be a string
  * @throws {TypeError} opsys argument must be a string
+ * @throws {TypeError} arch argument must be a number
  * @throws {TypeError} changelist argument must be a number
  * @throws {TypeError} cb argument must be a function
  * @fires module:BuildRetriever#new build
@@ -347,7 +349,7 @@ BuildRetriever.prototype.cleanBuildsFolder = function(maxBuilds, cb) {
  * @event module:BuildRetriever#no new build
  * @type {object}
  */
-BuildRetriever.prototype.checkTeamCity = function(kind, product, branch, opsys, changelist, cb) {
+BuildRetriever.prototype.checkTeamCity = function(kind, product, branch, opsys, arch, changelist, cb) {
     if (typeof kind !== 'string') {
         throw new TypeError('kind argument must be a string');
     }
@@ -359,6 +361,9 @@ BuildRetriever.prototype.checkTeamCity = function(kind, product, branch, opsys, 
     }
     if (typeof opsys !== 'string') {
         throw new TypeError('opsys argument must be a string');
+    }
+    if (typeof arch !== 'number') {
+        throw new TypeError('arch argument must be a number');
     }
     if (typeof changelist !== 'number') {
         throw new TypeError('changelist argument must be a number');
@@ -406,7 +411,7 @@ BuildRetriever.prototype.checkTeamCity = function(kind, product, branch, opsys, 
                 if (typeof cb === 'function') {
                     cb(error);
                 } else {
-                    self.emit('check teamcity failed', error, kind, product, branch, opsys, changelist);
+                    self.emit('check teamcity failed', error, kind, product, branch, opsys, arch, changelist);
                 }
             } else {
                 var i,
@@ -458,14 +463,24 @@ BuildRetriever.prototype.checkTeamCity = function(kind, product, branch, opsys, 
                             }, function(error, response, data) {
                                 if (!error) {
                                     var buildData = {},
-                                        buildOpSys;
+                                        buildOpSys,
+                                        buildArch;
 
                                     data.properties.property.forEach(function(property) {
                                         buildData[property.name.toLowerCase()] = property.value;
                                     });
                                     buildOpSys = buildData.os.toLowerCase().split(',');
                                     if (result === null &amp;&amp; buildOpSys.indexOf(opsys.toLowerCase()) !== -1) {
-                                        result = parseInt(item.changelist);
+                                        if (opsys.toLowerCase() !== 'linux' || task !== 'bt119') {
+                                            result = parseInt(item.changelist);
+                                        } else if (task === 'bt119') {
+                                            buildArch = buildData.arch.toLowerCase().split(',');
+                                            if (arch === 32 &amp;&amp; buildArch.indexOf('i386') !== -1) {
+                                                result = parseInt(item.changelist);
+                                            } else if (arch !== 32 &amp;&amp; buildArch.indexOf('i386') === -1) {
+                                                result = parseInt(item.changelist);
+                                            }
+                                        }
                                     }
                                     serieCallback(null);
                                 } else {
@@ -481,7 +496,7 @@ BuildRetriever.prototype.checkTeamCity = function(kind, product, branch, opsys, 
                             if (typeof cb === 'function') {
                                 cb(err);
                             } else {
-                                self.emit('check teamcity failed', err, kind, product, branch, opsys, changelist);
+                                self.emit('check teamcity failed', err, kind, product, branch, opsys, arch, changelist);
                             }
                         } else {
                             if (result !== null &amp;&amp; isNaN(result) === false &amp;&amp; result > 0) {
@@ -492,13 +507,13 @@ BuildRetriever.prototype.checkTeamCity = function(kind, product, branch, opsys, 
                                         var config = new Config();
                                         config.setCurrentChangelist(result);
                                     }
-                                    self.emit('new build', result, kind, product, branch, opsys, changelist);
+                                    self.emit('new build', result, kind, product, branch, opsys, arch, changelist);
                                 }
                             } else {
                                 if (typeof cb === 'function') {
                                     cb(null, false);
                                 } else {
-                                    self.emit('no new build', kind, product, branch, opsys, changelist);
+                                    self.emit('no new build', kind, product, branch, opsys, arch, changelist);
                                 }
                             }
                             
@@ -511,7 +526,7 @@ BuildRetriever.prototype.checkTeamCity = function(kind, product, branch, opsys, 
         if (typeof cb === 'function') {
             cb('no task found');
         } else {
-            self.emit('check teamcity failed', 'no task found', kind, product, branch, opsys, changelist);
+            self.emit('check teamcity failed', 'no task found', kind, product, branch, opsys, arch, changelist);
         }
     }
 
@@ -1035,13 +1050,13 @@ module.exports = BuildRetriever;</code></pre>
 </div>
 
 <nav>
-    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestReporter.html">TestReporter</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001052">bin/clean.js</a></li><li><a href="index.html#T000002R001071">bin/download.js</a></li><li><a href="index.html#T000002R001089">bin/init.js</a></li><li><a href="index.html#T000002R001061">bin/sync-all.js</a></li><li><a href="index.html#T000002R001066">bin/sync-test.js</a></li><li><a href="index.html#T000002R000978">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001017">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001035">qa-scripts/studio-monitor.js</a></li></ul>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-BuildRetriever.html">BuildRetriever</a></li><li><a href="module-BuildRunner.html">BuildRunner</a></li><li><a href="module-Config.html">Config</a></li><li><a href="module-LicenseUpdater.html">LicenseUpdater</a></li><li><a href="module-QA.html">QA</a></li><li><a href="module-SeleniumProxy.html">SeleniumProxy</a></li><li><a href="module-Synchronizer.html">Synchronizer</a></li><li><a href="module-TestReporter.html">TestReporter</a></li><li><a href="module-TestRunner.html">TestRunner</a></li></ul><h3>Global</h3><ul><li><a href="global.html#qaConfig">qaConfig</a></li></ul><h3>Scripts</h3><ul><li><a href="index.html#T000002R001136">bin/clean.js</a></li><li><a href="index.html#T000002R001155">bin/download.js</a></li><li><a href="index.html#T000002R001173">bin/init.js</a></li><li><a href="index.html#T000002R001145">bin/sync-all.js</a></li><li><a href="index.html#T000002R001150">bin/sync-test.js</a></li><li><a href="index.html#T000002R001062">qa-scripts/csjs-headless.js</a></li><li><a href="index.html#T000002R001101">qa-scripts/rename-in-pom.js</a></li><li><a href="index.html#T000002R001119">qa-scripts/studio-monitor.js</a></li></ul>
 </nav>
 
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Wed Sep 02 2015 17:46:01 GMT+0200 (Paris, Madrid (heure d’été))
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.3.2</a> on Thu Oct 15 2015 13:38:04 GMT+0200 (Paris, Madrid (heure d’été))
 </footer>
 
 <script> prettyPrint(); </script>
